@@ -12,7 +12,8 @@ build:
 	chmod a-w build/disk.img
 
 run: build
-	cp build/disk.img build/rw-disk.img
+	cp -f build/disk.img build/rw-disk.img
+	chmod 0600 build/rw-disk.img
 	qemu-system-i386 \
 		-machine isapc -cpu 486 -m 32 \
 		-drive if=ide,index=0,format=raw,file=build/rw-disk.img \
