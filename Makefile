@@ -9,6 +9,7 @@ build:
 	docker cp ${PREFIX}-tmp:/bootloader_installer/home/builder/grub/grub-core build/
 	docker cp ${PREFIX}-tmp:/debugroot build/
 	docker rm ${PREFIX}-tmp
+	chmod a-w build/disk.img
 
 run: build
 	cp build/disk.img build/rw-disk.img
