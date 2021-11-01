@@ -120,6 +120,7 @@ COPY grub/grub.cfg /boot/grub/
 RUN setup-alpine -q -f /etc/setup-alpine.conf
 RUN echo "root:vote" | chpasswd
 
+# Trim out large things we aren't using
 RUN rm -R \
         /packages \
         /sbin/apk \
@@ -137,7 +138,6 @@ RUN rm -R \
 	/usr/share/fonts/misc/12x13ja.pcf.gz \
 	/usr/share/fonts/misc/18x18ja.pcf.gz \
 	/usr/share/fonts/misc/18x18ko.pcf.gz
-
 
 ###############################################################
 FROM $I386_BASE_IMAGE as image_builder
@@ -161,7 +161,7 @@ RUN echo $[ $DISK_SIZE_CYLINDERS * $DISK_SIZE_HEADS * $DISK_SIZE_SECTORS ] > tot
   echo -ne "o\nn\np\n1\n`cat rootfs.sector`\n\na\nw\n" > fdisk.command && \
   fdisk -cdos -walways -C$DISK_SIZE_CYLINDERS -H$DISK_SIZE_HEADS -S$DISK_SIZE_SECTORS disk.img < fdisk.command
 
-# Build main rootfs as ext2 then add a journal after setting up extlinux
+# Build main rootfs as ext2 then add a journal after setting up grub
 COPY --from=rootfs / /rootfs/
 RUN mkfs.ext2 -d /rootfs/ -b 1024 -m 0 -v rootfs.img `cat rootfs.kilobytes` && \
   dd if=rootfs.img of=disk.img bs=512 seek=`cat rootfs.sector` conv=notrunc
