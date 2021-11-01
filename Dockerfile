@@ -63,7 +63,6 @@ RUN adduser -D builder
 USER builder
 WORKDIR /home/builder
 
-# Cache a vanilla grub build first
 RUN git clone $GRUB_URL grub
 WORKDIR /home/builder/grub
 RUN git pull && git checkout $GRUB_VERSION
