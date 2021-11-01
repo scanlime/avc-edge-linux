@@ -3,6 +3,10 @@ AVC Edge Linux
 
 Builds a tiny linux distro for the 486-based voting machine.
 
+This thing:
+
+https://verifiedvoting.org/election-system/sequoia-dominion-avc-edge/
+
 Software Parts list:
 - Linux 5.14.15 kernel, compiled for i486
 - Alpine Linux 3.14.2 userspace
