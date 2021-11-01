@@ -1,0 +1,32 @@
+diff --git a/grub-core/lib/i386/relocator16.S b/grub-core/lib/i386/relocator16.S
+index e9238119b..6e8c7ca1b 100644
+--- a/grub-core/lib/i386/relocator16.S
++++ b/grub-core/lib/i386/relocator16.S
+@@ -75,11 +75,6 @@ VARIABLE(grub_relocator16_start)
+ 	wrmsr
+ #endif
+ 
+-	/* Turn off PAE. */
+-	movl	%cr4, %eax
+-	andl	$(~GRUB_MEMORY_CPU_CR4_PAE_ON), %eax
+-	movl	%eax, %cr4
+-
+ 	/* Update other registers. */
+ 	movl	$PSEUDO_REAL_DSEG, %eax
+ 	movl	%eax, %ds
+diff --git a/grub-core/lib/i386/relocator32.S b/grub-core/lib/i386/relocator32.S
+index 09ce56ad0..d3fabcc13 100644
+--- a/grub-core/lib/i386/relocator32.S
++++ b/grub-core/lib/i386/relocator32.S
+@@ -49,11 +49,6 @@ VARIABLE(grub_relocator32_start)
+ 	wrmsr
+ #endif
+ 
+-	/* Turn off PAE. */
+-	movl	%cr4, %eax
+-	andl	$(~GRUB_MEMORY_CPU_CR4_PAE_ON), %eax
+-	movl	%eax, %cr4
+-
+ 	jmp	LOCAL(cont2)
+ LOCAL(cont2):
+ 	.code32

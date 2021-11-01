@@ -1,0 +1,6335 @@
+diff --git a/dix/gc.c b/dix/gc.c
+index 4ccbd3b54..c210b5909 100644
+--- a/dix/gc.c
++++ b/dix/gc.c
+@@ -797,7 +797,7 @@ is what fills the default tile.  (maybe this comment should
+ go with CreateGC() or ChangeGC().)
+ */
+ 
+-static GCPtr
++_X_EXPORT GCPtr
+ CreateScratchGC(ScreenPtr pScreen, unsigned depth)
+ {
+     GCPtr pGC;
+diff --git a/hw/xfree86/common/Makefile.am b/hw/xfree86/common/Makefile.am
+index 41758fd2e..3e741eee6 100644
+--- a/hw/xfree86/common/Makefile.am
++++ b/hw/xfree86/common/Makefile.am
+@@ -25,7 +25,7 @@ endif
+ 
+ RANDRSOURCES = xf86RandR.c
+ 
+-BUSSOURCES = xf86fbBus.c xf86noBus.c $(PCI_SOURCES) $(SBUS_SOURCES) $(PLATSOURCES)
++BUSSOURCES = xf86isaBus.c xf86fbBus.c xf86noBus.c $(PCI_SOURCES) $(SBUS_SOURCES) $(PLATSOURCES)
+ 
+ MODEDEFSOURCES = $(srcdir)/vesamodes $(srcdir)/extramodes
+ 
+@@ -36,7 +36,7 @@ xf86DefModeSet.c: $(srcdir)/modeline2c.awk $(MODEDEFSOURCES)
+ BUILT_SOURCES = xf86DefModeSet.c
+ 
+ AM_LDFLAGS = -r
+-libcommon_la_SOURCES = xf86Configure.c xf86Bus.c xf86Config.c \
++libcommon_la_SOURCES = xf86Configure.c xf86Bus.c xf86isaBus.c xf86Config.c \
+                       xf86Cursor.c $(DGASOURCES) xf86DPMS.c \
+                       xf86Events.c xf86Globals.c xf86AutoConfig.c \
+                       xf86Option.c xf86Init.c \
+diff --git a/hw/xfree86/common/meson.build b/hw/xfree86/common/meson.build
+index 514999ff6..fd5c72e49 100644
+--- a/hw/xfree86/common/meson.build
++++ b/hw/xfree86/common/meson.build
+@@ -3,6 +3,7 @@ srcs_xorg_common = [
+     'xf86noBus.c',
+     'xf86Configure.c',
+     'xf86Bus.c',
++    'xf86isaBus.c',
+     'xf86Config.c',
+     'xf86Cursor.c',
+     'xf86DPMS.c',
+diff --git a/hw/xfree86/common/xf86.h b/hw/xfree86/common/xf86.h
+index 5743f0cd4..e57b4bd94 100644
+--- a/hw/xfree86/common/xf86.h
++++ b/hw/xfree86/common/xf86.h
+@@ -65,6 +65,8 @@ extern _X_EXPORT DevPrivateKeyRec xf86ScreenKeyRec;
+ extern _X_EXPORT ScrnInfoPtr *xf86Screens;      /* List of pointers to ScrnInfoRecs */
+ extern _X_EXPORT const unsigned char byte_reversed[256];
+ extern _X_EXPORT Bool fbSlotClaimed;
++extern _X_EXPORT Bool isaSlotClaimed;
++
+ 
+ #if (defined(__sparc__) || defined(__sparc)) && !defined(__OpenBSD__)
+ extern _X_EXPORT Bool sbusSlotClaimed;
+@@ -135,6 +137,38 @@ extern _X_EXPORT ScrnInfoPtr xf86ConfigPciEntity(ScrnInfoPtr pScrn,
+ #define xf86VGAarbiterWrapFunctions() do {} while (0)
+ #endif
+ 
++/* ISA is back!! */
++
++extern _X_EXPORT ScrnInfoPtr xf86ConfigIsaEntity(ScrnInfoPtr pScrn,
++                                                 int scrnFlag,
++                                                 int entityIndex,
++                                                 IsaChipsets *i_chip,
++                                                 resList res,
++                                                 EntityProc init,
++                                                 EntityProc enter,
++                                                 EntityProc leave,
++                                                 void *private);
++extern _X_EXPORT void xf86ConfigIsaEntityInactive(EntityInfoPtr pEnt,
++                                                  IsaChipsets *i_chip,
++                                                  resList res,
++                                                  EntityProc init,
++                                                  EntityProc enter,
++                                                  EntityProc leave,
++                                                  void *private);
++extern _X_EXPORT int xf86MatchIsaInstances(const char *driverName,
++                                           SymTabPtr chipsets,
++                                           IsaChipsets *ISAchipsets,
++                                           DriverPtr drvp,
++                                           FindIsaDevProc FindIsaDevice,
++                                           GDevPtr *devList,
++                                           int numDevs,
++                                           int **foundEntities);
++
++extern _X_EXPORT int xf86ClaimIsaSlot(DriverPtr drvp, int chipset, GDevPtr dev, Bool active);
++extern _X_EXPORT int xf86GetIsaInfoForScreen(int scrnIndex);
++extern _X_EXPORT Bool xf86ParseIsaBusString(const char *busID);
++extern _X_EXPORT Bool xf86IsPrimaryIsa(void);
++
+ /* xf86Bus.c */
+ 
+ extern _X_EXPORT int xf86GetFbInfoForScreen(int scrnIndex);
+diff --git a/hw/xfree86/common/xf86Bus.c b/hw/xfree86/common/xf86Bus.c
+index 6bbf489ab..02164a527 100644
+--- a/hw/xfree86/common/xf86Bus.c
++++ b/hw/xfree86/common/xf86Bus.c
+@@ -263,7 +263,9 @@ StringToBusType(const char *busID, const char **retID)
+         return BUS_NONE;
+     }
+     if (!xf86NameCmp(p, "pci") || !xf86NameCmp(p, "agp"))
+-        ret = BUS_PCI;
++	ret = BUS_PCI;
++    if (!xf86NameCmp(p, "isa"))
++	ret = BUS_ISA;
+     if (!xf86NameCmp(p, "sbus"))
+         ret = BUS_SBUS;
+     if (!xf86NameCmp(p, "platform"))
+@@ -302,7 +304,9 @@ xf86IsEntityPrimary(int entityIndex)
+ 
+     switch (pEnt->bus.type) {
+     case BUS_PCI:
+-        return pEnt->bus.id.pci == primaryBus.id.pci;
++	return (pEnt->bus.id.pci == primaryBus.id.pci);
++    case BUS_ISA:
++	return TRUE;
+     case BUS_SBUS:
+         return pEnt->bus.id.sbus.fbNum == primaryBus.id.sbus.fbNum;
+     case BUS_PLATFORM:
+@@ -543,6 +547,7 @@ xf86PostProbe(void)
+ #ifdef XSERVER_PLATFORM_BUS
+                              platformSlotClaimed ||
+ #endif
++                             isaSlotClaimed ||
+ #ifdef XSERVER_LIBPCIACCESS
+                              pciSlotClaimed
+ #else
+diff --git a/hw/xfree86/common/xf86Configure.c b/hw/xfree86/common/xf86Configure.c
+index 44e759166..92c84dc1c 100644
+--- a/hw/xfree86/common/xf86Configure.c
++++ b/hw/xfree86/common/xf86Configure.c
+@@ -95,6 +95,17 @@ xf86AddBusDeviceToConfigure(const char *driver, BusType bus, void *busData,
+             ret = xf86PciConfigure(busData, DevToConfig[i].pVideo);
+             break;
+ #endif
++        case BUS_ISA:
++            /*
++             * This needs to be revisited as it doesn't allow for non-PCI
++             * multihead.
++             */
++            if (!xf86IsPrimaryIsa())
++                return NULL;
++            for (i = 0;  i < nDevToConfig;  i++)
++                if (!DevToConfig[i].pVideo)
++                    return NULL;
++            break;
+ #if (defined(__sparc__) || defined(__sparc)) && !defined(__OpenBSD__)
+         case BUS_SBUS:
+             ret = xf86SbusConfigure(busData, DevToConfig[i].sVideo);
+@@ -126,11 +137,15 @@ xf86AddBusDeviceToConfigure(const char *driver, BusType bus, void *busData,
+     switch (bus) {
+ #ifdef XSERVER_LIBPCIACCESS
+     case BUS_PCI:
+-	DevToConfig[i].pVideo = busData;
++        DevToConfig[i].pVideo = busData;
+         xf86PciConfigureNewDev(busData, DevToConfig[i].pVideo,
+                                &DevToConfig[i].GDev, &chipset);
+         break;
+ #endif
++    case BUS_ISA:
++        DevToConfig[i].GDev.identifier = "ISA Adapter";
++        DevToConfig[i].GDev.busID = "ISA";
++        break;
+ #if (defined(__sparc__) || defined(__sparc)) && !defined(__OpenBSD__)
+     case BUS_SBUS:
+ 	DevToConfig[i].sVideo = busData;
+@@ -153,6 +168,17 @@ xf86AddBusDeviceToConfigure(const char *driver, BusType bus, void *busData,
+     return NULL;
+ }
+ 
++/*
++ * Backwards compatibility
++ */
++_X_EXPORT GDevPtr
++xf86AddDeviceToConfigure(const char *driver, struct pci_device * pVideo,
++			 int chipset)
++{
++    return xf86AddBusDeviceToConfigure(driver, pVideo ? BUS_PCI : BUS_ISA,
++				       pVideo, chipset);
++}
++
+ static XF86ConfInputPtr
+ configureInputSection(void)
+ {
+diff --git a/hw/xfree86/common/xf86Helper.c b/hw/xfree86/common/xf86Helper.c
+index 95a90ad88..85971b464 100644
+--- a/hw/xfree86/common/xf86Helper.c
++++ b/hw/xfree86/common/xf86Helper.c
+@@ -1365,6 +1365,108 @@ xf86MatchDevice(const char *drivername, GDevPtr ** sectlist)
+     return i;
+ }
+ 
++_X_EXPORT int
++xf86MatchIsaInstances(const char *driverName, SymTabPtr chipsets,
++		      IsaChipsets *ISAchipsets, DriverPtr drvp,
++		      FindIsaDevProc FindIsaDevice, GDevPtr *devList,
++		      int numDevs, int **foundEntities)
++{
++    SymTabRec *c;
++    IsaChipsets *Chips;
++    int i;
++    int numFound = 0;
++    int foundChip = -1;
++    int *retEntities = NULL;
++
++    *foundEntities = NULL;
++
++#if defined(__sparc__) || defined(__powerpc__)
++    FindIsaDevice = NULL;	/* Temporary */
++#endif
++
++    if (xf86DoConfigure && xf86DoConfigurePass1) {
++	if (FindIsaDevice &&
++	    ((foundChip = (*FindIsaDevice)(NULL)) != -1)) {
++	    xf86AddBusDeviceToConfigure(drvp->driverName, BUS_ISA, NULL, foundChip);
++	    return 1;
++	}
++	return 0;
++    }
++
++    for (i = 0; i < numDevs; i++) {
++	MessageType from = X_CONFIG;
++	GDevPtr dev = NULL;
++	GDevPtr devBus = NULL;
++
++	if (devList[i]->busID && *devList[i]->busID) {
++	    if (xf86ParseIsaBusString(devList[i]->busID)) {
++		if (devBus) xf86MsgVerb(X_WARNING,0,
++					"%s: More than one matching Device "
++					"section for ISA-Bus found: %s\n",
++					driverName,devList[i]->identifier);
++		else devBus = devList[i];
++	    }
++	} else {
++	    if (xf86IsPrimaryIsa()) {
++		if (dev) xf86MsgVerb(X_WARNING,0,
++				     "%s: More than one matching "
++				     "Device section found: %s\n",
++				     driverName,devList[i]->identifier);
++		else dev = devList[i];
++	    }
++	}
++	if (devBus) dev = devBus;
++	if (dev) {
++	    if (dev->chipset) {
++		for (c = chipsets; c->token >= 0; c++) {
++		    if (xf86NameCmp(c->name, dev->chipset) == 0)
++			break;
++		}
++		if (c->token == -1) {
++		    xf86MsgVerb(X_WARNING, 0, "%s: Chipset \"%s\" in Device "
++				"section \"%s\" isn't valid for this driver\n",
++				driverName, dev->chipset,
++				dev->identifier);
++		} else
++		    foundChip = c->token;
++	    } else {
++		if (FindIsaDevice) foundChip = (*FindIsaDevice)(dev);
++                                                        /* Probe it */
++		from = X_PROBED;
++	    }
++	}
++
++	/* Check if the chip type is listed in the chipset table - for sanity*/
++
++	if (foundChip >= 0){
++	    for (Chips = ISAchipsets; Chips->numChipset >= 0; Chips++) {
++		if (Chips->numChipset == foundChip)
++		    break;
++	    }
++	    if (Chips->numChipset == -1){
++		foundChip = -1;
++		xf86MsgVerb(X_WARNING,0,
++			    "%s: Driver detected unknown ISA-Bus Chipset\n",
++			    driverName);
++	    }
++	}
++	if (foundChip != -1) {
++	    numFound++;
++	    retEntities = xnfrealloc(retEntities,numFound * sizeof(int));
++	    retEntities[numFound - 1] =
++	    xf86ClaimIsaSlot(drvp,foundChip,dev, dev->active ? TRUE : FALSE);
++	    for (c = chipsets; c->token >= 0; c++) {
++		if (c->token == foundChip)
++		    break;
++	    }
++	    xf86Msg(from, "Chipset %s found\n", c->name);
++	}
++    }
++    *foundEntities = retEntities;
++
++    return numFound;
++}
++
+ const char *
+ xf86GetVisualName(int visual)
+ {
+@@ -1651,6 +1753,58 @@ xf86FindXvOptions(ScrnInfoPtr pScrn, int adaptor_index, const char *port_name,
+     return NULL;
+ }
+ 
++_X_EXPORT void
++xf86ConfigIsaEntityInactive(EntityInfoPtr pEnt, IsaChipsets *i_chip,
++                           resList res, EntityProc init, EntityProc enter,
++                           EntityProc leave, void *private)
++{
++    ScrnInfoPtr pScrn;
++
++    if ((pScrn = xf86FindScreenForEntity(pEnt->index)))
++       xf86RemoveEntityFromScreen(pScrn,pEnt->index);
++}
++
++/*
++ * xf86ConfigIsa/PciEntity() -- These helper functions assign an
++ * active entity to a screen, registers its fixed resources, assign
++ * special enter/leave functions and their private scratch area to
++ * this entity, take the dog for a walk...
++ */
++_X_EXPORT ScrnInfoPtr
++xf86ConfigIsaEntity(ScrnInfoPtr pScrn, int scrnFlag, int entityIndex,
++			  IsaChipsets *i_chip, resList res, EntityProc init,
++			  EntityProc enter, EntityProc leave, void *private)
++{
++    IsaChipsets *i_id;
++    EntityInfoPtr pEnt = xf86GetEntityInfo(entityIndex);
++    if (!pEnt) return pScrn;
++
++    if (!(pEnt->location.type == BUS_ISA)) {
++	free(pEnt);
++	return pScrn;
++    }
++
++    if (!pEnt->active) {
++	xf86ConfigIsaEntityInactive(pEnt, i_chip, res, init,  enter,
++				    leave,  private);
++	free(pEnt);
++	return pScrn;
++    }
++
++    if (!pScrn)
++	pScrn = xf86AllocateScreen(pEnt->driver,scrnFlag);
++    xf86AddEntityToScreen(pScrn,entityIndex);
++
++    if (i_chip) {
++	for (i_id = i_chip; i_id->numChipset != -1; i_id++) {
++	    if (pEnt->chipset == i_id->numChipset) break;
++	}
++    }
++    free(pEnt);
++
++    return pScrn;
++}
++
+ static void
+ xf86ConfigFbEntityInactive(EntityInfoPtr pEnt, EntityProc init,
+                            EntityProc enter, EntityProc leave, void *private)
+diff --git a/hw/xfree86/common/xf86RandR.c b/hw/xfree86/common/xf86RandR.c
+index 08f656b30..64bd3211e 100644
+--- a/hw/xfree86/common/xf86RandR.c
++++ b/hw/xfree86/common/xf86RandR.c
+@@ -27,6 +27,7 @@
+ 
+ #include <X11/X.h>
+ #include "os.h"
++#include "mibank.h"
+ #include "globals.h"
+ #include "xf86.h"
+ #include "xf86str.h"
+diff --git a/hw/xfree86/common/xf86isaBus.c b/hw/xfree86/common/xf86isaBus.c
+new file mode 100644
+index 000000000..a62008177
+--- /dev/null
++++ b/hw/xfree86/common/xf86isaBus.c
+@@ -0,0 +1,111 @@
++/*
++ * Copyright (c) 1997-2000 by The XFree86 Project, Inc.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ *
++ * Except as contained in this notice, the name of the copyright holder(s)
++ * and author(s) shall not be used in advertising or otherwise to promote
++ * the sale, use or other dealings in this Software without prior written
++ * authorization from the copyright holder(s) and author(s).
++ */
++
++
++/*
++ * This file contains the interfaces to the bus-specific code
++ */
++
++#ifdef HAVE_XORG_CONFIG_H
++#include <xorg-config.h>
++#endif
++
++#include <ctype.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <X11/X.h>
++#include "os.h"
++#include "xf86.h"
++#include "xf86Priv.h"
++
++#include "xf86Bus.h"
++
++#define XF86_OS_PRIVS
++#define NEED_OS_RAC_PROTOS
++#include "xf86_OSproc.h"
++
++Bool isaSlotClaimed = FALSE;
++
++/*
++ * If the slot requested is already in use, return FALSE.
++ * Otherwise, claim the slot for the screen requesting it.
++ */
++
++_X_EXPORT int
++xf86ClaimIsaSlot(DriverPtr drvp, int chipset, GDevPtr dev, Bool active)
++{
++    EntityPtr p;
++    int num;
++
++    num = xf86AllocateEntity();
++    p = xf86Entities[num];
++    p->driver = drvp;
++    p->chipset = chipset;
++    p->active = active;
++    p->inUse = FALSE;
++    xf86AddDevToEntity(num, dev);
++    isaSlotClaimed = TRUE;
++    return num;
++}
++
++/*
++ * Get the list of ISA "slots" claimed by a screen
++ *
++ * Note: The ISA implementation here assumes that only one ISA "slot" type
++ * can be claimed by any one screen.  That means a return value other than
++ * 0 or 1 isn't useful.
++ */
++int
++xf86GetIsaInfoForScreen(int scrnIndex)
++{
++    return xf86Screens[scrnIndex]->numEntities;
++}
++
++/*
++ * Parse a BUS ID string, and return True if it is a ISA bus id.
++ */
++
++_X_EXPORT Bool
++xf86ParseIsaBusString(const char *busID)
++{
++    /*
++     * The format assumed to be "isa" or "isa:"
++     */
++    return (StringToBusType(busID,NULL) == BUS_ISA);
++}
++
++
++/*
++ * xf86IsPrimaryIsa() -- return TRUE if primary device
++ * is ISA.
++ */
++
++_X_EXPORT Bool
++xf86IsPrimaryIsa(void)
++{
++    return ( primaryBus.type == BUS_ISA );
++}
+diff --git a/hw/xfree86/common/xf86str.h b/hw/xfree86/common/xf86str.h
+index edd91c745..029a74281 100644
+--- a/hw/xfree86/common/xf86str.h
++++ b/hw/xfree86/common/xf86str.h
+@@ -262,6 +262,7 @@ typedef enum {
+     BUS_PCI,
+     BUS_SBUS,
+     BUS_PLATFORM,
++    BUS_ISA,
+     BUS_last                    /* Keep last */
+ } BusType;
+ 
+@@ -269,10 +270,15 @@ typedef struct {
+     int fbNum;
+ } SbusBusId;
+ 
++typedef struct {
++    unsigned int dummy;
++} IsaBusId;
++
+ typedef struct _bus {
+     BusType type;
+     union {
+         struct pci_device *pci;
++        IsaBusId isa;
+         SbusBusId sbus;
+         struct xf86_platform_device *plat;
+     } id;
+@@ -312,6 +318,8 @@ typedef struct {
+     int screen;                 /* For multi-CRTC cards */
+ } GDevRec, *GDevPtr;
+ 
++typedef int (*FindIsaDevProc)(GDevPtr dev);
++
+ typedef struct {
+     int frameX0;
+     int frameY0;
+@@ -446,6 +454,14 @@ typedef enum {
+     PM_NONE
+ } pmWait;
+ 
++// Deprecated
++typedef struct _resRange resRange, *resList;
++
++typedef struct {
++    int numChipset;
++    resRange *resList;
++} IsaChipsets;
++
+ typedef struct _PciChipsets {
+     /**
+      * Key used to match this device with its name in an array of
+diff --git a/hw/xfree86/int10/generic.c b/hw/xfree86/int10/generic.c
+index 8d5c4daf3..f0905e258 100644
+--- a/hw/xfree86/int10/generic.c
++++ b/hw/xfree86/int10/generic.c
+@@ -204,6 +204,19 @@ xf86ExtendedInitInt10(int entityIndex, int Flags)
+             }
+             INTPriv(pInt)->highMemory = GET_HIGH_BASE(rom_device->rom_size);
+             break;
++        case BUS_ISA:
++    	    vbiosMem = (unsigned char *)sysMem + bios_location;
++#if 0
++	    memset(vbiosMem, 0, V_BIOS_SIZE);
++	    if (xf86ReadBIOS(bios_location, 0, vbiosMem, V_BIOS_SIZE)
++		< V_BIOS_SIZE)
++		xf86DrvMsg(screen, X_WARNING,
++	                       "Unable to retrieve all of segment 0x%x.\n",bios_location);
++#endif
++    	    if (!int10_check_bios(screen, bios_location >> 4, vbiosMem)) {
++    	        xf86DrvMsg(screen,X_ERROR,"Cannot read V_BIOS (4)\n");
++    		goto error1;
++    	    }
+         }
+         default:
+             goto error1;
+diff --git a/hw/xfree86/loader/xf86sym.c b/hw/xfree86/loader/xf86sym.c
+new file mode 100644
+index 000000000..2d646bcb4
+--- /dev/null
++++ b/hw/xfree86/loader/xf86sym.c
+@@ -0,0 +1,991 @@
++/*
++ * Copyright 1995,96 by Metro Link, Inc.
++ *
++ * Permission to use, copy, modify, distribute, and sell this software and its
++ * documentation for any purpose is hereby granted without fee, provided that
++ * the above copyright notice appear in all copies and that both that
++ * copyright notice and this permission notice appear in supporting
++ * documentation, and that the name of Metro Link, Inc. not be used in
++ * advertising or publicity pertaining to distribution of the software without
++ * specific, written prior permission.  Metro Link, Inc. makes no
++ * representations about the suitability of this software for any purpose.
++ *  It is provided "as is" without express or implied warranty.
++ *
++ * METRO LINK, INC. DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
++ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
++ * EVENT SHALL METRO LINK, INC. BE LIABLE FOR ANY SPECIAL, INDIRECT OR
++ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
++ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
++ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++/*
++ * Copyright (c) 1997-2003 by The XFree86 Project, Inc.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ *
++ * Except as contained in this notice, the name of the copyright holder(s)
++ * and author(s) shall not be used in advertising or otherwise to promote
++ * the sale, use or other dealings in this Software without prior written
++ * authorization from the copyright holder(s) and author(s).
++ */
++
++#ifdef HAVE_XORG_CONFIG_H
++#include <xorg-config.h>
++#endif
++
++#include <fcntl.h>
++#include <setjmp.h>
++#include "sym.h"
++#include "misc.h"
++#include "mi.h"
++#include "cursor.h"
++#include "mipointer.h"
++#include "loaderProcs.h"
++#include "xf86Pci.h"
++#include "xf86.h"
++#include "xf86Resources.h"
++#include "xf86_OSproc.h"
++#include "xf86Parser.h"
++#include "xf86Config.h"
++#include "xf86Xinput.h"
++#ifdef XV
++#include "xf86xv.h"
++#include "xf86xvmc.h"
++#endif
++#include "xf86cmap.h"
++#include "xf86fbman.h"
++#include "dgaproc.h"
++#ifdef DPMSExtension
++#include "dpmsproc.h"
++#endif
++#include "vidmodeproc.h"
++#include "loader.h"
++#include "xisb.h"
++#include "vbe.h"
++#ifndef __OpenBSD__
++#include "xf86sbusBus.h"
++#endif
++#include "compiler.h"
++#include "xf86Crtc.h"
++#include "xf86Modes.h"
++#ifdef RANDR
++#include "xf86RandR12.h"
++#endif
++#include "xf86DDC.h"
++#include "edid.h"
++#include "xf86Cursor.h"
++#include "xf86RamDac.h"
++#include "BT.h"
++#include "IBM.h"
++#include "TI.h"
++
++#include "xf86RamDac.h"
++#include "BT.h"
++
++#ifndef HAS_GLIBC_SIGSETJMP
++#if defined(setjmp) && defined(__GNU_LIBRARY__) && \
++    (!defined(__GLIBC__) || (__GLIBC__ < 2) || \
++     ((__GLIBC__ == 2) && (__GLIBC_MINOR__ < 3)))
++#define HAS_GLIBC_SIGSETJMP 1
++#endif
++#endif
++
++#if defined(__alpha__)
++# ifdef linux
++extern unsigned long _bus_base(void);
++extern void _outb(char val, unsigned short port);
++extern void _outw(short val, unsigned short port);
++extern void _outl(int val, unsigned short port);
++extern unsigned int _inb(unsigned short port);
++extern unsigned int _inw(unsigned short port);
++extern unsigned int _inl(unsigned short port);
++# endif
++
++# ifdef __FreeBSD__
++#  include <sys/types.h>
++extern void outb(u_int32_t port, u_int8_t val);
++extern void outw(u_int32_t port, u_int16_t val);
++extern void outl(u_int32_t port, u_int32_t val);
++extern u_int8_t inb(u_int32_t port);
++extern u_int16_t inw(u_int32_t port);
++extern u_int32_t inl(u_int32_t port);
++# endif
++
++extern void *__divl(long, long);
++extern void *__reml(long, long);
++extern void *__divlu(long, long);
++extern void *__remlu(long, long);
++extern void *__divq(long, long);
++extern void *__divqu(long, long);
++extern void *__remq(long, long);
++extern void *__remqu(long, long);
++#endif
++
++#if defined(__sparc__) && defined(__FreeBSD__)
++extern float _Qp_qtos(unsigned int *);
++extern double _Qp_qtod(unsigned int *);
++extern unsigned long long _Qp_qtoux(unsigned int *);
++extern void _Qp_dtoq(unsigned int *, double);
++extern void _Qp_uitoq(unsigned int *, unsigned int);
++#endif
++
++#if defined(__GNUC__)
++extern long __div64(long, long);
++extern long __divdf3(long, long);
++extern long __divdi3(long, long);
++extern long __divsf3(long, long);
++extern long __divsi3(long, long);
++extern long __moddi3(long, long);
++extern long __modsi3(long, long);
++
++extern long __mul64(long, long);
++extern long __muldf3(long, long);
++extern long __muldi3(long, long);
++extern long __mulsf3(long, long);
++extern long __mulsi3(long, long);
++extern long __udivdi3(long, long);
++extern long __udivsi3(long, long);
++extern long __umoddi3(long, long);
++extern long __umodsi3(long, long);
++
++#pragma weak __div64
++#pragma weak __divdf3
++#pragma weak __divdi3
++#pragma weak __divsf3
++#pragma weak __divsi3
++#pragma weak __moddi3
++#pragma weak __modsi3
++#pragma weak __mul64
++#pragma weak __muldf3
++#pragma weak __muldi3
++#pragma weak __mulsf3
++#pragma weak __mulsi3
++#pragma weak __udivdi3
++#pragma weak __udivsi3
++#pragma weak __umoddi3
++#pragma weak __umodsi3
++#endif
++
++#if defined(__arm__) && defined(__linux__)
++#include <sys/io.h>
++#endif
++
++#if defined(__powerpc__) && defined(linux)
++void _restf14();
++void _restf17();
++void _restf18();
++void _restf19();
++void _restf20();
++void _restf22();
++void _restf23();
++void _restf24();
++void _restf25();
++void _restf26();
++void _restf27();
++void _restf28();
++void _restf29();
++void _savef14();
++void _savef17();
++void _savef18();
++void _savef19();
++void _savef20();
++void _savef22();
++void _savef23();
++void _savef24();
++void _savef25();
++void _savef26();
++void _savef27();
++void _savef28();
++void _savef29();
++
++/* even if we compile without -DNO_INLINE we still provide
++ * the usual port i/o functions for module use
++ */
++
++extern volatile unsigned char *ioBase;
++
++/* XXX Should get all of these from elsewhere */
++#ifndef linux
++extern void outb(IOADDRESS, unsigned char);
++extern void outw(IOADDRESS, unsigned short);
++extern void outl(IOADDRESS, unsigned int);
++extern unsigned int inb(IOADDRESS);
++extern unsigned int inw(IOADDRESS);
++extern unsigned int inl(IOADDRESS);
++#endif
++extern void stl_brx(unsigned long, volatile unsigned char *, int);
++extern void stw_brx(unsigned short, volatile unsigned char *, int);
++extern unsigned long ldl_brx(volatile unsigned char *, int);
++extern unsigned short ldw_brx(volatile unsigned char *, int);
++#endif
++
++/* XFree86 things */
++
++_X_HIDDEN void *xfree86LookupTab[] = {
++
++    /* Public OSlib functions */
++    SYMFUNC(xf86ReadBIOS)
++    SYMFUNC(xf86EnableIO)
++    SYMFUNC(xf86DisableIO)
++    SYMFUNC(xf86DisableInterrupts)
++    SYMFUNC(xf86EnableInterrupts)
++    SYMFUNC(xf86LinearVidMem)
++    SYMFUNC(xf86CheckMTRR)
++    SYMFUNC(xf86MapVidMem)
++    SYMFUNC(xf86UnMapVidMem)
++    SYMFUNC(xf86MapReadSideEffects)
++    SYMFUNC(xf86MapDomainMemory)
++    SYMFUNC(xf86UDelay)
++    SYMFUNC(xf86IODelay)
++    SYMFUNC(xf86SlowBcopy)
++    SYMFUNC(xf86SetReallySlowBcopy)
++#ifdef __alpha__
++    SYMFUNC(xf86SlowBCopyToBus)
++    SYMFUNC(xf86SlowBCopyFromBus)
++#endif
++    SYMFUNC(xf86BusToMem)
++    SYMFUNC(xf86MemToBus)
++    SYMFUNC(xf86OpenSerial)
++    SYMFUNC(xf86SetSerial)
++    SYMFUNC(xf86SetSerialSpeed)
++    SYMFUNC(xf86ReadSerial)
++    SYMFUNC(xf86WriteSerial)
++    SYMFUNC(xf86CloseSerial)
++    SYMFUNC(xf86WaitForInput)
++    SYMFUNC(xf86SerialSendBreak)
++    SYMFUNC(xf86FlushInput)
++    SYMFUNC(xf86SetSerialModemState)
++    SYMFUNC(xf86GetSerialModemState)
++    SYMFUNC(xf86SerialModemSetBits)
++    SYMFUNC(xf86SerialModemClearBits)
++    SYMFUNC(xf86LoadKernelModule)
++    SYMFUNC(xf86AgpGARTSupported)
++    SYMFUNC(xf86GetAGPInfo)
++    SYMFUNC(xf86AcquireGART)
++    SYMFUNC(xf86ReleaseGART)
++    SYMFUNC(xf86AllocateGARTMemory)
++    SYMFUNC(xf86DeallocateGARTMemory)
++    SYMFUNC(xf86BindGARTMemory)
++    SYMFUNC(xf86UnbindGARTMemory)
++    SYMFUNC(xf86EnableAGP)
++    SYMFUNC(xf86GARTCloseScreen)
++    SYMFUNC(XisbNew)
++    SYMFUNC(XisbFree)
++    SYMFUNC(XisbRead)
++    SYMFUNC(XisbWrite)
++    SYMFUNC(XisbTrace)
++    SYMFUNC(XisbBlockDuration)
++
++    /* xf86Bus.c */
++    SYMFUNC(xf86CheckPciSlot)
++    SYMFUNC(xf86ClaimPciSlot)
++    SYMFUNC(xf86ClaimIsaSlot)
++    SYMFUNC(xf86ClaimFbSlot)
++    SYMFUNC(xf86ClaimNoSlot)
++    SYMFUNC(xf86ParsePciBusString)
++    SYMFUNC(xf86ComparePciBusString)
++    SYMFUNC(xf86FormatPciBusNumber)
++    SYMFUNC(xf86ParseIsaBusString)
++    SYMFUNC(xf86EnableAccess)
++    SYMFUNC(xf86SetCurrentAccess)
++    SYMFUNC(xf86IsPrimaryPci)
++    SYMFUNC(xf86IsPrimaryIsa)
++    SYMFUNC(xf86FreeResList)
++    SYMFUNC(xf86ClaimFixedResources)
++    SYMFUNC(xf86AddEntityToScreen)
++    SYMFUNC(xf86SetEntityInstanceForScreen)
++    SYMFUNC(xf86RemoveEntityFromScreen)
++    SYMFUNC(xf86GetEntityInfo)
++    SYMFUNC(xf86GetNumEntityInstances)
++    SYMFUNC(xf86GetDevFromEntity)
++    SYMFUNC(xf86GetPciInfoForEntity)
++    SYMFUNC(xf86RegisterResources)
++    SYMFUNC(xf86CheckPciMemBase)
++    SYMFUNC(xf86SetAccessFuncs)
++    SYMFUNC(xf86IsEntityPrimary)
++    SYMFUNC(xf86SetOperatingState)
++    SYMFUNC(xf86FindScreenForEntity)
++    SYMFUNC(xf86RegisterStateChangeNotificationCallback)
++    SYMFUNC(xf86DeregisterStateChangeNotificationCallback)
++    /* Shared Accel Accessor Functions */
++    SYMFUNC(xf86GetLastScrnFlag)
++    SYMFUNC(xf86SetLastScrnFlag)
++    SYMFUNC(xf86IsEntityShared)
++    SYMFUNC(xf86SetEntityShared)
++    SYMFUNC(xf86IsEntitySharable)
++    SYMFUNC(xf86SetEntitySharable)
++    SYMFUNC(xf86IsPrimInitDone)
++    SYMFUNC(xf86SetPrimInitDone)
++    SYMFUNC(xf86ClearPrimInitDone)
++    SYMFUNC(xf86AllocateEntityPrivateIndex)
++    SYMFUNC(xf86GetEntityPrivate)
++
++    /* xf86Configure.c */
++    SYMFUNC(xf86AddDeviceToConfigure)
++
++    /* xf86Cursor.c */
++    SYMFUNC(xf86GetPointerScreenFuncs)
++
++    /* xf86DGA.c */
++    /* For drivers */
++    SYMFUNC(DGAInit)
++    SYMFUNC(DGAReInitModes)
++    /* For extmod */
++    SYMFUNC(DGAAvailable)
++    SYMFUNC(DGAActive)
++    SYMFUNC(DGASetMode)
++    SYMFUNC(DGASetInputMode)
++    SYMFUNC(DGASelectInput)
++    SYMFUNC(DGAGetViewportStatus)
++    SYMFUNC(DGASetViewport)
++    SYMFUNC(DGAInstallCmap)
++    SYMFUNC(DGASync)
++    SYMFUNC(DGAFillRect)
++    SYMFUNC(DGABlitRect)
++    SYMFUNC(DGABlitTransRect)
++    SYMFUNC(DGAGetModes)
++    SYMFUNC(DGAGetOldDGAMode)
++    SYMFUNC(DGAGetModeInfo)
++    SYMFUNC(DGAChangePixmapMode)
++    SYMFUNC(DGACreateColormap)
++    SYMFUNC(DGAOpenFramebuffer)
++    SYMFUNC(DGACloseFramebuffer)
++
++    /* xf86DPMS.c */
++    SYMFUNC(xf86DPMSInit)
++
++    /* xf86Events.c */
++    SYMFUNC(SetTimeSinceLastInputEvent)
++    SYMFUNC(xf86AddInputHandler)
++    SYMFUNC(xf86RemoveInputHandler)
++    SYMFUNC(xf86DisableInputHandler)
++    SYMFUNC(xf86EnableInputHandler)
++    SYMFUNC(xf86AddEnabledDevice)
++    SYMFUNC(xf86RemoveEnabledDevice)
++    SYMFUNC(xf86InterceptSignals)
++    SYMFUNC(xf86InterceptSigIll)
++    SYMFUNC(xf86EnableVTSwitch)
++
++    /* xf86Helper.c */
++    SYMFUNC(xf86AddDriver)
++    SYMFUNC(xf86AddInputDriver)
++    SYMFUNC(xf86DeleteDriver)
++    SYMFUNC(xf86DeleteInput)
++    SYMFUNC(xf86AllocateInput)
++    SYMFUNC(xf86AllocateScreen)
++    SYMFUNC(xf86DeleteScreen)
++    SYMFUNC(xf86AllocateScrnInfoPrivateIndex)
++    SYMFUNC(xf86AddPixFormat)
++    SYMFUNC(xf86SetDepthBpp)
++    SYMFUNC(xf86PrintDepthBpp)
++    SYMFUNC(xf86SetWeight)
++    SYMFUNC(xf86SetDefaultVisual)
++    SYMFUNC(xf86SetGamma)
++    SYMFUNC(xf86SetDpi)
++    SYMFUNC(xf86SetBlackWhitePixels)
++    SYMFUNC(xf86EnableDisableFBAccess)
++    SYMFUNC(xf86VDrvMsgVerb)
++    SYMFUNC(xf86DrvMsgVerb)
++    SYMFUNC(xf86DrvMsg)
++    SYMFUNC(xf86MsgVerb)
++    SYMFUNC(xf86Msg)
++    SYMFUNC(xf86ErrorFVerb)
++    SYMFUNC(xf86ErrorF)
++    SYMFUNC(xf86TokenToString)
++    SYMFUNC(xf86StringToToken)
++    SYMFUNC(xf86ShowClocks)
++    SYMFUNC(xf86PrintChipsets)
++    SYMFUNC(xf86MatchDevice)
++    SYMFUNC(xf86MatchPciInstances)
++    SYMFUNC(xf86MatchIsaInstances)
++    SYMFUNC(xf86GetVerbosity)
++    SYMFUNC(xf86GetVisualName)
++    SYMFUNC(xf86GetPix24)
++    SYMFUNC(xf86GetDepth)
++    SYMFUNC(xf86GetWeight)
++    SYMFUNC(xf86GetGamma)
++    SYMFUNC(xf86GetFlipPixels)
++    SYMFUNC(xf86GetServerName)
++    SYMFUNC(xf86ServerIsExiting)
++    SYMFUNC(xf86ServerIsOnlyDetecting)
++    SYMFUNC(xf86ServerIsOnlyProbing)
++    SYMFUNC(xf86ServerIsResetting)
++    SYMFUNC(xf86CaughtSignal)
++    SYMFUNC(xf86GetVidModeAllowNonLocal)
++    SYMFUNC(xf86GetVidModeEnabled)
++    SYMFUNC(xf86GetModInDevAllowNonLocal)
++    SYMFUNC(xf86GetModInDevEnabled)
++    SYMFUNC(xf86GetAllowMouseOpenFail)
++    SYMFUNC(xf86IsPc98)
++    SYMFUNC(xf86DisableRandR)
++    SYMFUNC(xf86GetRotation)
++    SYMFUNC(xf86GetModuleVersion)
++    SYMFUNC(xf86GetClocks)
++    SYMFUNC(xf86SetPriority)
++    SYMFUNC(xf86LoadDrvSubModule)
++    SYMFUNC(xf86LoadSubModule)
++    SYMFUNC(xf86LoadOneModule)
++    SYMFUNC(xf86UnloadSubModule)
++    SYMFUNC(xf86LoaderCheckSymbol)
++    SYMFUNC(xf86LoaderRefSymLists)
++    SYMFUNC(xf86LoaderRefSymbols)
++    SYMFUNC(xf86LoaderReqSymLists)
++    SYMFUNC(xf86LoaderReqSymbols)
++    SYMFUNC(xf86SetBackingStore)
++    SYMFUNC(xf86SetSilkenMouse)
++    /* SYMFUNC(xf86NewSerialNumber) */
++    SYMFUNC(xf86FindXvOptions)
++    SYMFUNC(xf86GetOS)
++    SYMFUNC(xf86ConfigPciEntity)
++    SYMFUNC(xf86ConfigIsaEntity)
++    SYMFUNC(xf86ConfigFbEntity)
++    SYMFUNC(xf86ConfigActivePciEntity)
++    SYMFUNC(xf86ConfigActiveIsaEntity)
++    SYMFUNC(xf86ConfigPciEntityInactive)
++    SYMFUNC(xf86ConfigIsaEntityInactive)
++    SYMFUNC(xf86IsScreenPrimary)
++    SYMFUNC(xf86RegisterRootWindowProperty)
++    SYMFUNC(xf86IsUnblank)
++
++#if (defined(__sparc__) || defined(__sparc)) && !defined(__OpenBSD__)
++    /* xf86sbusBus.c */
++    SYMFUNC(xf86MatchSbusInstances)
++    SYMFUNC(xf86GetSbusInfoForEntity)
++    SYMFUNC(xf86GetEntityForSbusInfo)
++    SYMFUNC(xf86SbusUseBuiltinMode)
++    SYMFUNC(xf86MapSbusMem)
++    SYMFUNC(xf86UnmapSbusMem)
++    SYMFUNC(xf86SbusHideOsHwCursor)
++    SYMFUNC(xf86SbusSetOsHwCursorCmap)
++    SYMFUNC(xf86SbusHandleColormaps)
++    SYMFUNC(sparcPromInit)
++    SYMFUNC(sparcPromClose)
++    SYMFUNC(sparcPromGetProperty)
++    SYMFUNC(sparcPromGetBool)
++#endif
++
++    /* xf86Init.c */
++    SYMFUNC(xf86GetPixFormat)
++    SYMFUNC(xf86GetBppFromDepth)
++
++    /* xf86Mode.c */
++    SYMFUNC(xf86GetNearestClock)
++    SYMFUNC(xf86ModeStatusToString)
++    SYMFUNC(xf86LookupMode)
++    SYMFUNC(xf86CheckModeForMonitor)
++    SYMFUNC(xf86InitialCheckModeForDriver)
++    SYMFUNC(xf86CheckModeForDriver)
++    SYMFUNC(xf86ValidateModes)
++    SYMFUNC(xf86DeleteMode)
++    SYMFUNC(xf86PruneDriverModes)
++    SYMFUNC(xf86SetCrtcForModes)
++    SYMFUNC(xf86PrintModes)
++    SYMFUNC(xf86ShowClockRanges)
++
++    /* xf86Option.c */
++    SYMFUNC(xf86CollectOptions)
++    SYMFUNC(xf86CollectInputOptions)
++    /* Merging of XInput stuff   */
++    SYMFUNC(xf86AddNewOption)
++    SYMFUNC(xf86NewOption)
++    SYMFUNC(xf86NextOption)
++    SYMFUNC(xf86OptionListCreate)
++    SYMFUNC(xf86OptionListMerge)
++    SYMFUNC(xf86OptionListFree)
++    SYMFUNC(xf86OptionName)
++    SYMFUNC(xf86OptionValue)
++    SYMFUNC(xf86OptionListReport)
++    SYMFUNC(xf86SetIntOption)
++    SYMFUNC(xf86SetRealOption)
++    SYMFUNC(xf86SetStrOption)
++    SYMFUNC(xf86SetBoolOption)
++    SYMFUNC(xf86CheckIntOption)
++    SYMFUNC(xf86CheckRealOption)
++    SYMFUNC(xf86CheckStrOption)
++    SYMFUNC(xf86CheckBoolOption)
++    SYMFUNC(xf86ReplaceIntOption)
++    SYMFUNC(xf86ReplaceRealOption)
++    SYMFUNC(xf86ReplaceStrOption)
++    SYMFUNC(xf86ReplaceBoolOption)
++    SYMFUNC(xf86FindOption)
++    SYMFUNC(xf86FindOptionValue)
++    SYMFUNC(xf86MarkOptionUsed)
++    SYMFUNC(xf86MarkOptionUsedByName)
++    SYMFUNC(xf86CheckIfOptionUsed)
++    SYMFUNC(xf86CheckIfOptionUsedByName)
++    SYMFUNC(xf86ShowUnusedOptions)
++    SYMFUNC(xf86ProcessOptions)
++    SYMFUNC(xf86TokenToOptinfo)
++    SYMFUNC(xf86TokenToOptName)
++    SYMFUNC(xf86IsOptionSet)
++    SYMFUNC(xf86GetOptValString)
++    SYMFUNC(xf86GetOptValInteger)
++    SYMFUNC(xf86GetOptValULong)
++    SYMFUNC(xf86GetOptValReal)
++    SYMFUNC(xf86GetOptValFreq)
++    SYMFUNC(xf86GetOptValBool)
++    SYMFUNC(xf86ReturnOptValBool)
++    SYMFUNC(xf86NameCmp)
++    SYMFUNC(xf86InitValuatorAxisStruct)
++    SYMFUNC(xf86InitValuatorDefaults)
++
++    /* xf86fbman.c */
++    SYMFUNC(xf86InitFBManager)
++    SYMFUNC(xf86InitFBManagerArea)
++    SYMFUNC(xf86InitFBManagerRegion)
++    SYMFUNC(xf86InitFBManagerLinear)
++    SYMFUNC(xf86RegisterFreeBoxCallback)
++    SYMFUNC(xf86FreeOffscreenArea)
++    SYMFUNC(xf86AllocateOffscreenArea)
++    SYMFUNC(xf86AllocateLinearOffscreenArea)
++    SYMFUNC(xf86ResizeOffscreenArea)
++    SYMFUNC(xf86FBManagerRunning)
++    SYMFUNC(xf86QueryLargestOffscreenArea)
++    SYMFUNC(xf86PurgeUnlockedOffscreenAreas)
++    SYMFUNC(xf86RegisterOffscreenManager)
++    SYMFUNC(xf86AllocateOffscreenLinear)
++    SYMFUNC(xf86ResizeOffscreenLinear)
++    SYMFUNC(xf86QueryLargestOffscreenLinear)
++    SYMFUNC(xf86FreeOffscreenLinear)
++
++    /* xf86cmap.c */
++    SYMFUNC(xf86HandleColormaps)
++    SYMFUNC(xf86GetGammaRampSize)
++    SYMFUNC(xf86GetGammaRamp)
++    SYMFUNC(xf86ChangeGammaRamp)
++
++    /* xf86RandR.c */
++#ifdef RANDR
++    SYMFUNC(xf86RandRSetNewVirtualAndDimensions)
++#endif
++
++    /* xf86xv.c */
++#ifdef XV
++    SYMFUNC(xf86XVScreenInit)
++    SYMFUNC(xf86XVRegisterGenericAdaptorDriver)
++    SYMFUNC(xf86XVListGenericAdaptors)
++    SYMFUNC(xf86XVRegisterOffscreenImages)
++    SYMFUNC(xf86XVQueryOffscreenImages)
++    SYMFUNC(xf86XVAllocateVideoAdaptorRec)
++    SYMFUNC(xf86XVFreeVideoAdaptorRec)
++    SYMFUNC(xf86XVFillKeyHelper)
++    SYMFUNC(xf86XVFillKeyHelperDrawable)
++    SYMFUNC(xf86XVClipVideoHelper)
++    SYMFUNC(xf86XVCopyYUV12ToPacked)
++    SYMFUNC(xf86XVCopyPacked)
++
++    /* xf86xvmc.c */
++    SYMFUNC(xf86XvMCScreenInit)
++    SYMFUNC(xf86XvMCCreateAdaptorRec)
++    SYMFUNC(xf86XvMCDestroyAdaptorRec)
++#endif
++
++    /* xf86VidMode.c */
++    SYMFUNC(VidModeExtensionInit)
++#ifdef XF86VIDMODE
++    SYMFUNC(VidModeGetCurrentModeline)
++    SYMFUNC(VidModeGetFirstModeline)
++    SYMFUNC(VidModeGetNextModeline)
++    SYMFUNC(VidModeDeleteModeline)
++    SYMFUNC(VidModeZoomViewport)
++    SYMFUNC(VidModeGetViewPort)
++    SYMFUNC(VidModeSetViewPort)
++    SYMFUNC(VidModeSwitchMode)
++    SYMFUNC(VidModeLockZoom)
++    SYMFUNC(VidModeGetMonitor)
++    SYMFUNC(VidModeGetNumOfClocks)
++    SYMFUNC(VidModeGetClocks)
++    SYMFUNC(VidModeCheckModeForMonitor)
++    SYMFUNC(VidModeCheckModeForDriver)
++    SYMFUNC(VidModeSetCrtcForMode)
++    SYMFUNC(VidModeAddModeline)
++    SYMFUNC(VidModeGetDotClock)
++    SYMFUNC(VidModeGetNumOfModes)
++    SYMFUNC(VidModeSetGamma)
++    SYMFUNC(VidModeGetGamma)
++    SYMFUNC(VidModeCreateMode)
++    SYMFUNC(VidModeCopyMode)
++    SYMFUNC(VidModeGetModeValue)
++    SYMFUNC(VidModeSetModeValue)
++    SYMFUNC(VidModeGetMonitorValue)
++    SYMFUNC(VidModeSetGammaRamp)
++    SYMFUNC(VidModeGetGammaRamp)
++    SYMFUNC(VidModeGetGammaRampSize)
++#endif
++
++    /* Misc */
++    SYMFUNC(GetTimeInMillis)
++
++    /* xf86Xinput.c */
++    SYMFUNC(xf86ProcessCommonOptions)
++    SYMFUNC(xf86PostMotionEvent)
++    SYMFUNC(xf86PostProximityEvent)
++    SYMFUNC(xf86PostButtonEvent)
++    SYMFUNC(xf86PostKeyEvent)
++    SYMFUNC(xf86PostKeyboardEvent)
++    SYMFUNC(xf86FirstLocalDevice)
++    SYMFUNC(xf86ActivateDevice)
++    SYMFUNC(xf86XInputSetScreen)
++    SYMFUNC(xf86ScaleAxis)
++    SYMFUNC(NewInputDeviceRequest)
++    SYMFUNC(DeleteInputDeviceRequest)
++#ifdef DPMSExtension
++    SYMFUNC(DPMSGet)
++    SYMFUNC(DPMSSet)
++    SYMFUNC(DPMSSupported)
++#endif
++
++    SYMFUNC(pciTag)
++    SYMFUNC(pciBusAddrToHostAddr)
++
++    /* Loader functions */
++    SYMFUNC(LoadSubModule)
++    SYMFUNC(DuplicateModule)
++    SYMFUNC(LoaderErrorMsg)
++    SYMFUNC(LoaderCheckUnresolved)
++    SYMFUNC(LoadExtension)
++    SYMFUNC(LoaderReqSymbols)
++    SYMFUNC(LoaderReqSymLists)
++    SYMFUNC(LoaderRefSymbols)
++    SYMFUNC(LoaderRefSymLists)
++    SYMFUNC(UnloadSubModule)
++    SYMFUNC(LoaderSymbol)
++    SYMFUNC(LoaderListDirs)
++    SYMFUNC(LoaderFreeDirList)
++    SYMFUNC(LoaderGetOS)
++    SYMFUNC(LoaderShouldIgnoreABI)
++    SYMFUNC(LoaderGetABIVersion)
++
++#ifdef XF86DRI
++    /*
++     * These may have more general uses, but for now, they are only used
++     * by the DRI.  Loading them only when the DRI is built may make porting
++     * (the non-DRI portions of the X server) easier.
++     */
++    SYMFUNC(xf86InstallSIGIOHandler)
++    SYMFUNC(xf86RemoveSIGIOHandler)
++# if defined(__alpha__) && defined(linux)
++    SYMFUNC(_bus_base)
++# endif
++#endif
++    SYMFUNC(xf86BlockSIGIO)
++    SYMFUNC(xf86UnblockSIGIO)
++
++#if defined(__alpha__)
++    SYMFUNC(__divl)
++    SYMFUNC(__reml)
++    SYMFUNC(__divlu)
++    SYMFUNC(__remlu)
++    SYMFUNC(__divq)
++    SYMFUNC(__divqu)
++    SYMFUNC(__remq)
++    SYMFUNC(__remqu)
++
++# ifdef linux
++    SYMFUNC(_outw)
++    SYMFUNC(_outb)
++    SYMFUNC(_outl)
++    SYMFUNC(_inb)
++    SYMFUNC(_inw)
++    SYMFUNC(_inl)
++    SYMFUNC(_alpha_outw)
++    SYMFUNC(_alpha_outb)
++    SYMFUNC(_alpha_outl)
++    SYMFUNC(_alpha_inb)
++    SYMFUNC(_alpha_inw)
++    SYMFUNC(_alpha_inl)
++# else
++    SYMFUNC(outw)
++    SYMFUNC(outb)
++    SYMFUNC(outl)
++    SYMFUNC(inb)
++    SYMFUNC(inw)
++    SYMFUNC(inl)
++# endif
++    SYMFUNC(xf86ReadMmio32)
++    SYMFUNC(xf86ReadMmio16)
++    SYMFUNC(xf86ReadMmio8)
++    SYMFUNC(xf86WriteMmio32)
++    SYMFUNC(xf86WriteMmio16)
++    SYMFUNC(xf86WriteMmio8)
++    SYMFUNC(xf86WriteMmioNB32)
++    SYMFUNC(xf86WriteMmioNB16)
++    SYMFUNC(xf86WriteMmioNB8)
++#endif
++#if defined(sun) && defined(SVR4)
++    SYMFUNC(inb)
++    SYMFUNC(inw)
++    SYMFUNC(inl)
++    SYMFUNC(outb)
++    SYMFUNC(outw)
++    SYMFUNC(outl)
++#endif
++#if defined(__powerpc__) && !defined(__OpenBSD__)
++    SYMFUNC(inb)
++    SYMFUNC(inw)
++    SYMFUNC(inl)
++    SYMFUNC(outb)
++    SYMFUNC(outw)
++    SYMFUNC(outl)
++# if defined(NO_INLINE)
++    SYMFUNC(mem_barrier)
++    SYMFUNC(ldl_u)
++    SYMFUNC(eieio)
++    SYMFUNC(ldl_brx)
++    SYMFUNC(ldw_brx)
++    SYMFUNC(stl_brx)
++    SYMFUNC(stw_brx)
++    SYMFUNC(ldq_u)
++    SYMFUNC(ldw_u)
++    SYMFUNC(stl_u)
++    SYMFUNC(stq_u)
++    SYMFUNC(stw_u)
++    SYMFUNC(write_mem_barrier)
++# endif
++# if PPCIO_DEBUG
++    SYMFUNC(debug_inb)
++    SYMFUNC(debug_inw)
++    SYMFUNC(debug_inl)
++    SYMFUNC(debug_outb)
++    SYMFUNC(debug_outw)
++    SYMFUNC(debug_outl)
++# endif
++#endif
++#if defined(__GNUC__)
++    SYMFUNC(__div64)
++    SYMFUNC(__divdf3)
++    SYMFUNC(__divdi3)
++    SYMFUNC(__divsf3)
++    SYMFUNC(__divsi3)
++    SYMFUNC(__moddi3)
++    SYMFUNC(__modsi3)
++    SYMFUNC(__mul64)
++    SYMFUNC(__muldf3)
++    SYMFUNC(__muldi3)
++    SYMFUNC(__mulsf3)
++    SYMFUNC(__mulsi3)
++    SYMFUNC(__udivdi3)
++    SYMFUNC(__udivsi3)
++    SYMFUNC(__umoddi3)
++    SYMFUNC(__umodsi3)
++#endif
++#if defined(__ia64__)
++    SYMFUNC(outw)
++    SYMFUNC(outb)
++    SYMFUNC(outl)
++    SYMFUNC(inb)
++    SYMFUNC(inw)
++    SYMFUNC(inl)
++#endif
++#if defined(__arm__)
++    SYMFUNC(outw)
++    SYMFUNC(outb)
++    SYMFUNC(outl)
++    SYMFUNC(inb)
++    SYMFUNC(inw)
++    SYMFUNC(inl)
++#endif
++
++#ifdef __FreeBSD__
++#if defined(__sparc__)
++    SYMFUNC(_Qp_qtos)
++    SYMFUNC(_Qp_qtod)
++    SYMFUNC(_Qp_qtoux)
++    SYMFUNC(_Qp_uitoq)
++    SYMFUNC(_Qp_dtoq)
++#endif
++#endif
++
++    /* General variables (from xf86.h) */
++    SYMVAR(xf86ScreenKey)
++    SYMVAR(xf86PixmapKey)
++    SYMVAR(xf86Screens)
++    SYMVAR(byte_reversed)
++    SYMVAR(xf86inSuspend)
++
++    /* predefined resource lists from xf86Bus.h */
++    SYMVAR(resVgaExclusive)
++    SYMVAR(resVgaShared)
++    SYMVAR(resVgaMemShared)
++    SYMVAR(resVgaIoShared)
++    SYMVAR(resVgaUnusedExclusive)
++    SYMVAR(resVgaUnusedShared)
++    SYMVAR(resVgaSparseExclusive)
++    SYMVAR(resVgaSparseShared)
++    SYMVAR(res8514Exclusive)
++    SYMVAR(res8514Shared)
++
++#if defined(__powerpc__) && !defined(NO_INLINE)
++    SYMVAR(ioBase)
++#endif
++
++    /* Globals from xf86Globals.c and xf86Priv.h */
++    SYMVAR(xf86ConfigDRI)
++
++    /* Globals from xf86Configure.c */
++    SYMVAR(ConfiguredMonitor)
++
++    /* modes */
++    SYMVAR(xf86CrtcConfigPrivateIndex)
++    SYMFUNC(xf86CrtcConfigInit)
++    SYMFUNC(xf86CrtcConfigPrivateIndex)
++    SYMFUNC(xf86CrtcCreate)
++    SYMFUNC(xf86CrtcDestroy)
++    SYMFUNC(xf86CrtcInUse)
++    SYMFUNC(xf86CrtcSetScreenSubpixelOrder)
++    SYMFUNC(xf86RotateFreeShadow)
++    SYMFUNC(xf86RotateCloseScreen)
++    SYMFUNC(xf86CrtcRotate)
++    SYMFUNC(xf86CrtcSetMode)
++    SYMFUNC(xf86CrtcSetSizeRange)
++    SYMFUNC(xf86CrtcScreenInit)
++    SYMFUNC(xf86CVTMode)
++    SYMFUNC(xf86GTFMode)
++    SYMFUNC(xf86DisableUnusedFunctions)
++    SYMFUNC(xf86DPMSSet)
++    SYMFUNC(xf86DuplicateMode)
++    SYMFUNC(xf86DuplicateModes)
++    SYMFUNC(xf86GetDefaultModes)
++    SYMFUNC(xf86GetMonitorModes)
++    SYMFUNC(xf86InitialConfiguration)
++    SYMFUNC(xf86ModeHSync)
++    SYMFUNC(xf86ModesAdd)
++    SYMFUNC(xf86ModesEqual)
++    SYMFUNC(xf86ModeVRefresh)
++    SYMFUNC(xf86ModeWidth)
++    SYMFUNC(xf86ModeHeight)
++    SYMFUNC(xf86OutputCreate)
++    SYMFUNC(xf86OutputDestroy)
++    SYMFUNC(xf86OutputGetEDID)
++    SYMFUNC(xf86ConnectorGetName)
++    SYMFUNC(xf86OutputGetEDIDModes)
++    SYMFUNC(xf86OutputRename)
++    SYMFUNC(xf86OutputUseScreenMonitor)
++    SYMFUNC(xf86OutputSetEDID)
++    SYMFUNC(xf86OutputFindClosestMode)
++    SYMFUNC(xf86PrintModeline)
++    SYMFUNC(xf86ProbeOutputModes)
++    SYMFUNC(xf86PruneInvalidModes)
++    SYMFUNC(xf86SetModeCrtc)
++    SYMFUNC(xf86SetModeDefaultName)
++    SYMFUNC(xf86SetScrnInfoModes)
++    SYMFUNC(xf86SetDesiredModes)
++    SYMFUNC(xf86SetSingleMode)
++    SYMFUNC(xf86ValidateModesClocks)
++    SYMFUNC(xf86ValidateModesFlags)
++    SYMFUNC(xf86ValidateModesSize)
++    SYMFUNC(xf86ValidateModesSync)
++    SYMFUNC(xf86ValidateModesUserConfig)
++    SYMFUNC(xf86DiDGAInit)
++    SYMFUNC(xf86DiDGAReInit)
++    SYMFUNC(xf86DDCGetModes)
++    SYMFUNC(xf86SaveScreen)
++#ifdef RANDR
++    SYMFUNC(xf86RandR12CreateScreenResources)
++    SYMFUNC(xf86RandR12GetOriginalVirtualSize)
++    SYMFUNC(xf86RandR12GetRotation)
++    SYMFUNC(xf86RandR12Init)
++    SYMFUNC(xf86RandR12PreInit)
++    SYMFUNC(xf86RandR12SetConfig)
++    SYMFUNC(xf86RandR12SetRotations)
++    SYMFUNC(xf86RandR12TellChanged)
++#endif
++    SYMFUNC(xf86_cursors_init)
++    SYMFUNC(xf86_reload_cursors)
++    SYMFUNC(xf86_show_cursors)
++    SYMFUNC(xf86_hide_cursors)
++    SYMFUNC(xf86_cursors_fini)
++    SYMFUNC(xf86_crtc_clip_video_helper)
++
++    SYMFUNC(xf86DoEDID_DDC1)
++    SYMFUNC(xf86DoEDID_DDC2)
++    SYMFUNC(xf86InterpretEDID)
++    SYMFUNC(xf86PrintEDID)
++    SYMFUNC(xf86DoEEDID)
++    SYMFUNC(xf86DDCMonitorSet)
++    SYMFUNC(xf86SetDDCproperties)
++    SYMFUNC(xf86MonitorIsHDMI)
++
++    SYMFUNC(xf86CreateI2CBusRec)
++    SYMFUNC(xf86CreateI2CDevRec)
++    SYMFUNC(xf86DestroyI2CBusRec)
++    SYMFUNC(xf86DestroyI2CDevRec)
++    SYMFUNC(xf86I2CBusInit)
++    SYMFUNC(xf86I2CDevInit)
++    SYMFUNC(xf86I2CFindBus)
++    SYMFUNC(xf86I2CFindDev)
++    SYMFUNC(xf86I2CGetScreenBuses)
++    SYMFUNC(xf86I2CProbeAddress)
++    SYMFUNC(xf86I2CReadByte)
++    SYMFUNC(xf86I2CReadBytes)
++    SYMFUNC(xf86I2CReadStatus)
++    SYMFUNC(xf86I2CReadWord)
++    SYMFUNC(xf86I2CWriteByte)
++    SYMFUNC(xf86I2CWriteBytes)
++    SYMFUNC(xf86I2CWriteRead)
++    SYMFUNC(xf86I2CWriteVec)
++    SYMFUNC(xf86I2CWriteWord)
++
++    /* ramdac/xf86RamDac.c */
++    SYMFUNC(RamDacCreateInfoRec)
++    SYMFUNC(RamDacHelperCreateInfoRec)
++    SYMFUNC(RamDacDestroyInfoRec)
++    SYMFUNC(RamDacHelperDestroyInfoRec)
++    SYMFUNC(RamDacInit)
++    SYMFUNC(RamDacHandleColormaps)
++    SYMFUNC(RamDacFreeRec)
++    SYMFUNC(RamDacGetHWIndex)
++    SYMVAR(RamDacHWPrivateIndex)
++    SYMVAR(RamDacScreenPrivateIndex)
++
++    /* ramdac/xf86Cursor.c */
++    SYMFUNC(xf86InitCursor)
++    SYMFUNC(xf86CreateCursorInfoRec)
++    SYMFUNC(xf86DestroyCursorInfoRec)
++    SYMFUNC(xf86ForceHWCursor)
++
++    /* ramdac/BT.c */
++    SYMFUNC(BTramdacProbe)
++    SYMFUNC(BTramdacSave)
++    SYMFUNC(BTramdacRestore)
++    SYMFUNC(BTramdacSetBpp)
++
++    /* ramdac/IBM.c */
++    SYMFUNC(IBMramdacProbe)
++    SYMFUNC(IBMramdacSave)
++    SYMFUNC(IBMramdacRestore)
++    SYMFUNC(IBMramdac526SetBpp)
++    SYMFUNC(IBMramdac640SetBpp)
++    SYMFUNC(IBMramdac526CalculateMNPCForClock)
++    SYMFUNC(IBMramdac640CalculateMNPCForClock)
++    SYMFUNC(IBMramdac526HWCursorInit)
++    SYMFUNC(IBMramdac640HWCursorInit)
++    SYMFUNC(IBMramdac526SetBppWeak)
++
++    /* ramdac/TI.c */
++    SYMFUNC(TIramdacCalculateMNPForClock)
++    SYMFUNC(TIramdacProbe)
++    SYMFUNC(TIramdacSave)
++    SYMFUNC(TIramdacRestore)
++    SYMFUNC(TIramdac3026SetBpp)
++    SYMFUNC(TIramdac3030SetBpp)
++    SYMFUNC(TIramdacHWCursorInit)
++    SYMFUNC(TIramdacLoadPalette)
++};
+diff --git a/hw/xfree86/modes/xf86RandR12.c b/hw/xfree86/modes/xf86RandR12.c
+index f220ef192..260dcd942 100644
+--- a/hw/xfree86/modes/xf86RandR12.c
++++ b/hw/xfree86/modes/xf86RandR12.c
+@@ -26,6 +26,7 @@
+ 
+ #include "xf86.h"
+ #include "os.h"
++#include "mibank.h"
+ #include "globals.h"
+ #include "xf86Modes.h"
+ #include "xf86Priv.h"
+diff --git a/hw/xfree86/os-support/bsd/alpha_video.c b/hw/xfree86/os-support/bsd/alpha_video.c
+index b4038bd2b..df42a9ee8 100644
+--- a/hw/xfree86/os-support/bsd/alpha_video.c
++++ b/hw/xfree86/os-support/bsd/alpha_video.c
+@@ -35,6 +35,9 @@
+ #ifndef __NetBSD__
+ #include <sys/sysctl.h>
+ #endif
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
++#include <machine/sysarch.h>
++#endif
+ 
+ #include "xf86_OSlib.h"
+ #include "xf86OSpriv.h"
+@@ -47,6 +50,62 @@
+ 
+ #ifndef __NetBSD__
+ extern unsigned long dense_base(void);
++
++static int axpSystem = -1;
++static unsigned long hae_thresh;
++static unsigned long hae_mask;
++
++static unsigned long
++memory_base(void)
++{
++    static unsigned long base = 0;
++
++    if (base == 0) {
++        size_t len = sizeof(base);
++        int error;
++
++#ifdef __OpenBSD__
++        int mib[3];
++
++        mib[0] = CTL_MACHDEP;
++        mib[1] = CPU_CHIPSET;
++        mib[2] = CPU_CHIPSET_MEM;
++
++        if ((error = sysctl(mib, 3, &base, &len, NULL, 0)) < 0)
++#else
++        if ((error = sysctlbyname("hw.chipset.memory", &base, &len, 0, 0)) < 0)
++#endif
++            FatalError("xf86MapVidMem: can't find memory\n");
++    }
++
++    return base;
++}
++
++static int
++has_bwx(void)
++{
++    static int bwx = 0;
++    size_t len = sizeof(bwx);
++    int error;
++
++#ifdef __OpenBSD__
++    int mib[3];
++
++    mib[0] = CTL_MACHDEP;
++    mib[1] = CPU_CHIPSET;
++    mib[2] = CPU_CHIPSET_BWX;
++
++    if ((error = sysctl(mib, 3, &bwx, &len, NULL, 0)) < 0)
++        return FALSE;
++    else
++        return bwx;
++#else
++    if ((error = sysctlbyname("hw.chipset.bwx", &bwx, &len, 0, 0)) < 0)
++        return FALSE;
++    else
++        return bwx;
++#endif
++}
+ #else                           /* __NetBSD__ */
+ static struct alpha_bus_window *abw;
+ static int abw_count = -1;
+@@ -72,9 +131,30 @@ dense_base(void)
+     return abw[0].abw_abst.abst_sys_start;
+ }
+ 
++static unsigned long
++memory_base(void)
++{
++    if (abw_count < 0)
++        init_abw();
++
++    if (abw_count > 1) {
++        xf86Msg(X_INFO, "memory base = %#lx\n", abw[1].abw_abst.abst_sys_start);        /* XXXX */
++        return abw[1].abw_abst.abst_sys_start;
++    }
++    else if (abw_count == 1) {
++        /* assume memory_base == dense_base */
++        xf86Msg(X_INFO, "memory base = %#lx\n", abw[0].abw_abst.abst_sys_start);        /* XXXX */
++        return abw[0].abw_abst.abst_sys_start;
++    }
++    else {
++        xf86Msg(X_INFO, "no memory base\n");    /* XXXX */
++        return 0;
++    }
++}
+ #endif                          /* __NetBSD__ */
+ 
+ #define BUS_BASE	dense_base()
++#define BUS_BASE_BWX	memory_base()
+ 
+ /***************************************************************************/
+ /* Video Memory Mapping section                                            */
+@@ -92,6 +172,11 @@ static int devMemFd = -1;
+ #define DEV_APERTURE "/dev/xf86"
+ #endif
+ 
++static void *mapVidMem(int, unsigned long, unsigned long, int);
++static void unmapVidMem(int, void *, unsigned long);
++static void *mapVidMemSparse(int, unsigned long, unsigned long, int);
++static void unmapVidMemSparse(int, void *, unsigned long);
++
+ /*
+  * Check if /dev/mem can be mmap'd.  If it can't print a warning when
+  * "warn" is TRUE.
+@@ -170,9 +255,115 @@ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
+     checkDevMem(TRUE);
+ 
++    if (has_bwx()) {
++        xf86Msg(X_PROBED, "Machine type has 8/16 bit access\n");
++        pVidMem->mapMem = mapVidMem;
++        pVidMem->unmapMem = unmapVidMem;
++    }
++    else {
++        xf86Msg(X_PROBED, "Machine needs sparse mapping\n");
++        pVidMem->mapMem = mapVidMemSparse;
++        pVidMem->unmapMem = unmapVidMemSparse;
++#ifndef __NetBSD__
++        if (axpSystem == -1)
++            axpSystem = bsdGetAXP();
++        hae_thresh = xf86AXPParams[axpSystem].hae_thresh;
++        hae_mask = xf86AXPParams[axpSystem].hae_mask;
++#endif                          /* __NetBSD__ */
++    }
+     pVidMem->initialised = TRUE;
+ }
+ 
++static void *
++mapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int flags)
++{
++    void *base;
++
++    checkDevMem(FALSE);
++    Base = Base & ((1L << 32) - 1);
++
++    if (useDevMem) {
++        if (devMemFd < 0) {
++            FatalError("xf86MapVidMem: failed to open %s (%s)\n",
++                       DEV_MEM, strerror(errno));
++        }
++        base = mmap((caddr_t) 0, Size,
++                    (flags & VIDMEM_READONLY) ?
++                    PROT_READ : (PROT_READ | PROT_WRITE),
++                    MAP_FLAGS, devMemFd, (off_t) Base + BUS_BASE_BWX);
++        if (base == MAP_FAILED) {
++            FatalError("%s: could not mmap %s [s=%lx,a=%lx] (%s)\n",
++                       "xf86MapVidMem", DEV_MEM, Size, Base, strerror(errno));
++        }
++        return base;
++    }
++
++    /* else, mmap /dev/vga */
++    if ((unsigned long) Base < 0xA0000 || (unsigned long) Base >= 0xC0000) {
++        FatalError("%s: Address 0x%lx outside allowable range\n",
++                   "xf86MapVidMem", Base);
++    }
++    base = mmap(0, Size,
++                (flags & VIDMEM_READONLY) ?
++                PROT_READ : (PROT_READ | PROT_WRITE),
++                MAP_FLAGS, xf86Info.consoleFd, (unsigned long) Base + BUS_BASE);
++    if (base == MAP_FAILED) {
++        FatalError("xf86MapVidMem: Could not mmap /dev/vga (%s)\n",
++                   strerror(errno));
++    }
++    return base;
++}
++
++static void
++unmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    munmap((caddr_t) Base, Size);
++}
++
++/*
++ * Read BIOS via mmap()ing DEV_MEM
++ */
++
++int
++xf86ReadBIOS(unsigned long Base, unsigned long Offset, unsigned char *Buf,
++             int Len)
++{
++    unsigned char *ptr;
++    int psize;
++    int mlen;
++
++    checkDevMem(TRUE);
++    if (devMemFd == -1) {
++        return -1;
++    }
++
++    psize = getpagesize();
++    Offset += Base & (psize - 1);
++    Base &= ~(psize - 1);
++    mlen = (Offset + Len + psize - 1) & ~(psize - 1);
++    ptr = (unsigned char *) mmap((caddr_t) 0, mlen, PROT_READ,
++                                 MAP_SHARED, devMemFd, (off_t) Base + BUS_BASE);
++    if ((long) ptr == -1) {
++        xf86Msg(X_WARNING,
++                "xf86ReadBIOS: %s mmap[s=%x,a=%lx,o=%lx] failed (%s)\n",
++                DEV_MEM, Len, Base, Offset, strerror(errno));
++        return -1;
++    }
++#ifdef DEBUG
++    xf86MsgVerb(X_INFO, 3,
++                "xf86ReadBIOS: BIOS at 0x%08x has signature 0x%04x\n", Base,
++                ptr[0] | (ptr[1] << 8));
++#endif
++    (void) memcpy(Buf, (void *) (ptr + Offset), Len);
++    (void) munmap((caddr_t) ptr, mlen);
++#ifdef DEBUG
++    xf86MsgVerb(X_INFO, 3, "xf86ReadBIOS(%x, %x, Buf, %x)"
++                "-> %02x %02x %02x %02x...\n",
++                Base, Offset, Len, Buf[0], Buf[1], Buf[2], Buf[3]);
++#endif
++    return Len;
++}
++
+ #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__)
+ 
+ extern int ioperm(unsigned long from, unsigned long num, int on);
+@@ -210,6 +401,11 @@ xf86DisableIO()
+ 
+ #endif                          /* USE_ALPHA_PIO */
+ 
++#define vuip    volatile unsigned int *
++
++static void *memSBase = 0;
++static void *memBase = 0;
++
+ extern int readDense8(void *Base, register unsigned long Offset);
+ extern int readDense16(void *Base, register unsigned long Offset);
+ extern int readDense32(void *Base, register unsigned long Offset);
+@@ -220,6 +416,223 @@ extern void
+ extern void
+  writeDense32(int Value, void *Base, register unsigned long Offset);
+ 
++static int readSparse8(void *Base, register unsigned long Offset);
++static int readSparse16(void *Base, register unsigned long Offset);
++static int readSparse32(void *Base, register unsigned long Offset);
++static void
++ writeSparseNB8(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparseNB16(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparseNB32(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparse8(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparse16(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparse32(int Value, void *Base, register unsigned long Offset);
++
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
++extern int sysarch(int, void *);
++
++struct parms {
++    u_int64_t hae;
++};
++
++static void
++sethae(u_int64_t hae)
++{
++#ifndef ALPHA_SETHAE
++#define ALPHA_SETHAE 0
++#endif
++    static struct parms p;
++
++    if (p.hae != hae) {
++        p.hae = hae;
++        sysarch(ALPHA_SETHAE, (char *) &p);
++    }
++}
++#endif
++
++static void *
++mapVidMemSparse(int ScreenNum, unsigned long Base, unsigned long Size,
++                int flags)
++{
++    static Bool was_here = FALSE;
++
++    if (!was_here) {
++        was_here = TRUE;
++
++        checkDevMem(FALSE);
++
++        xf86WriteMmio8 = writeSparse8;
++        xf86WriteMmio16 = writeSparse16;
++        xf86WriteMmio32 = writeSparse32;
++        xf86WriteMmioNB8 = writeSparseNB8;
++        xf86WriteMmioNB16 = writeSparseNB16;
++        xf86WriteMmioNB32 = writeSparseNB32;
++        xf86ReadMmio8 = readSparse8;
++        xf86ReadMmio16 = readSparse16;
++        xf86ReadMmio32 = readSparse32;
++
++        memBase = mmap((caddr_t) 0, 0x100000000,
++                       PROT_READ | PROT_WRITE,
++                       MAP_SHARED, devMemFd, (off_t) BUS_BASE);
++        memSBase = mmap((caddr_t) 0, 0x100000000,
++                        PROT_READ | PROT_WRITE,
++                        MAP_SHARED, devMemFd, (off_t) BUS_BASE_BWX);
++
++        if (memSBase == MAP_FAILED || memBase == MAP_FAILED) {
++            FatalError("xf86MapVidMem: Could not mmap framebuffer (%s)\n",
++                       strerror(errno));
++        }
++    }
++    return (void *) ((unsigned long) memBase + Base);
++}
++
++static void
++unmapVidMemSparse(int ScreenNum, void *Base, unsigned long Size)
++{
++}
++
++static int
++readSparse8(void *Base, register unsigned long Offset)
++{
++    register unsigned long result, shift;
++    register unsigned long msb;
++
++    mem_barrier();
++    Offset += (unsigned long) Base - (unsigned long) memBase;
++    shift = (Offset & 0x3) << 3;
++    if (Offset >= (hae_thresh)) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
++        sethae(msb);
++#endif
++    }
++    result = *(vuip) ((unsigned long) memSBase + (Offset << 5));
++    result >>= shift;
++    return 0xffUL & result;
++}
++
++static int
++readSparse16(void *Base, register unsigned long Offset)
++{
++    register unsigned long result, shift;
++    register unsigned long msb;
++
++    mem_barrier();
++    Offset += (unsigned long) Base - (unsigned long) memBase;
++    shift = (Offset & 0x2) << 3;
++    if (Offset >= (hae_thresh)) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
++        sethae(msb);
++#endif
++    }
++    result =
++        *(vuip) ((unsigned long) memSBase + (Offset << 5) + (1 << (5 - 2)));
++    result >>= shift;
++    return 0xffffUL & result;
++}
++
++static int
++readSparse32(void *Base, register unsigned long Offset)
++{
++    mem_barrier();
++    return *(vuip) ((unsigned long) Base + (Offset));
++}
++
++static void
++writeSparse8(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int b = Value & 0xffU;
++
++    write_mem_barrier();
++    Offset += (unsigned long) Base - (unsigned long) memBase;
++    if (Offset >= (hae_thresh)) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
++        sethae(msb);
++#endif
++    }
++    *(vuip) ((unsigned long) memSBase + (Offset << 5)) = b * 0x01010101;
++}
++
++static void
++writeSparse16(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int w = Value & 0xffffU;
++
++    write_mem_barrier();
++    Offset += (unsigned long) Base - (unsigned long) memBase;
++    if (Offset >= (hae_thresh)) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
++        sethae(msb);
++#endif
++    }
++    *(vuip) ((unsigned long) memSBase + (Offset << 5) + (1 << (5 - 2))) =
++        w * 0x00010001;
++
++}
++
++static void
++writeSparse32(int Value, void *Base, register unsigned long Offset)
++{
++    write_mem_barrier();
++    *(vuip) ((unsigned long) Base + (Offset)) = Value;
++    return;
++}
++
++static void
++writeSparseNB8(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int b = Value & 0xffU;
++
++    Offset += (unsigned long) Base - (unsigned long) memBase;
++    if (Offset >= (hae_thresh)) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
++        sethae(msb);
++#endif
++    }
++    *(vuip) ((unsigned long) memSBase + (Offset << 5)) = b * 0x01010101;
++}
++
++static void
++writeSparseNB16(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int w = Value & 0xffffU;
++
++    Offset += (unsigned long) Base - (unsigned long) memBase;
++    if (Offset >= (hae_thresh)) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
++        sethae(msb);
++#endif
++    }
++    *(vuip) ((unsigned long) memSBase + (Offset << 5) + (1 << (5 - 2))) =
++        w * 0x00010001;
++}
++
++static void
++writeSparseNB32(int Value, void *Base, register unsigned long Offset)
++{
++    *(vuip) ((unsigned long) Base + (Offset)) = Value;
++    return;
++}
++
+ void (*xf86WriteMmio8) (int Value, void *Base, unsigned long Offset)
+     = writeDense8;
+ void (*xf86WriteMmio16) (int Value, void *Base, unsigned long Offset)
+diff --git a/hw/xfree86/os-support/bsd/arm_video.c b/hw/xfree86/os-support/bsd/arm_video.c
+index dd1020e33..f075cbd98 100644
+--- a/hw/xfree86/os-support/bsd/arm_video.c
++++ b/hw/xfree86/os-support/bsd/arm_video.c
+@@ -66,6 +66,35 @@
+ #include "xf86_OSlib.h"
+ #include "xf86OSpriv.h"
+ 
++#ifdef __arm32__
++#include "machine/devmap.h"
++struct memAccess {
++    int ioctl;
++    struct map_info memInfo;
++    void *regionVirtBase;
++    Bool Checked;
++    Bool OK;
++};
++
++static void *xf86MapInfoMap();
++static void xf86MapInfoUnmap();
++static struct memAccess *checkMapInfo();
++extern int vgaPhysLinearBase;
++
++/* A memAccess structure is needed for each possible region */
++struct memAccess vgaMemInfo = { CONSOLE_GET_MEM_INFO, NULL, NULL,
++    FALSE, FALSE
++};
++
++struct memAccess linearMemInfo = { CONSOLE_GET_LINEAR_INFO, NULL, NULL,
++    FALSE, FALSE
++};
++
++struct memAccess ioMemInfo = { CONSOLE_GET_IO_INFO, NULL, NULL,
++    FALSE, FALSE
++};
++#endif                          /* __arm32__ */
++
+ #if defined(__NetBSD__) && !defined(MAP_FILE)
+ #define MAP_FLAGS MAP_SHARED
+ #else
+@@ -81,6 +110,9 @@
+ 
+ static int devMemFd = -1;
+ 
++static void *mapVidMem(int, unsigned long, unsigned long, int);
++static void unmapVidMem(int, void *, unsigned long);
++
+ /*
+  * Check if /dev/mem can be mmap'd.  If it can't print a warning when
+  * "warn" is TRUE.
+@@ -126,10 +158,257 @@ void
+ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
+     checkDevMem(TRUE);
++    pVidMem->linearSupported = useDevMem;
++    pVidMem->mapMem = armMapVidMem;
++    pVidMem->unmapVidMem = armUnmapVidMem;
+ 
+     pVidMem->initialised = TRUE;
+ }
+ 
++static void *
++mapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int flags)
++{
++    void *base;
++
++    checkDevMem(FALSE);
++
++    if (useDevMem) {
++        if (devMemFd < 0) {
++            FatalError("xf86MapVidMem: failed to open %s (%s)\n",
++                       DEV_MEM, strerror(errno));
++        }
++        base = mmap((caddr_t) 0, Size,
++                    (flags & VIDMEM_READONLY) ?
++                    PROT_READ : (PROT_READ | PROT_WRITE),
++                    MAP_FLAGS, devMemFd, (off_t) Base + BUS_BASE_BWX);
++        if (base == MAP_FAILED) {
++            FatalError("%s: could not mmap %s [s=%x,a=%x] (%s)\n",
++                       "xf86MapVidMem", DEV_MEM, Size, Base, strerror(errno));
++        }
++        return base;
++    }
++
++    /* else, mmap /dev/vga */
++    if ((unsigned long) Base < 0xA0000 || (unsigned long) Base >= 0xC0000) {
++        FatalError("%s: Address 0x%x outside allowable range\n",
++                   "xf86MapVidMem", Base);
++    }
++    base = mmap(0, Size,
++                (flags & VIDMEM_READONLY) ?
++                PROT_READ : (PROT_READ | PROT_WRITE),
++                MAP_FLAGS, xf86Info.consoleFd, (unsigned long) Base - 0xA0000);
++    if (base == MAP_FAILED) {
++        FatalError("xf86MapVidMem: Could not mmap /dev/vga (%s)\n",
++                   strerror(errno));
++    }
++    return base;
++}
++
++static void
++unmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    munmap((caddr_t) Base, Size);
++}
++
++/*
++ * Read BIOS via mmap()ing DEV_MEM
++ */
++
++int
++xf86ReadBIOS(unsigned long Base, unsigned long Offset, unsigned char *Buf,
++             int Len)
++{
++    unsigned char *ptr;
++    int psize;
++    int mlen;
++
++    checkDevMem(TRUE);
++    if (devMemFd == -1) {
++        return -1;
++    }
++
++    psize = getpagesize();
++    Offset += Base & (psize - 1);
++    Base &= ~(psize - 1);
++    mlen = (Offset + Len + psize - 1) & ~(psize - 1);
++    ptr = (unsigned char *) mmap((caddr_t) 0, mlen, PROT_READ,
++                                 MAP_SHARED, devMemFd, (off_t) Base + BUS_BASE);
++    if ((long) ptr == -1) {
++        xf86Msg(X_WARNING,
++                "xf86ReadBIOS: %s mmap[s=%x,a=%x,o=%x] failed (%s)\n",
++                DEV_MEM, Len, Base, Offset, strerror(errno));
++        return -1;
++    }
++#ifdef DEBUG
++    ErrorF("xf86ReadBIOS: BIOS at 0x%08x has signature 0x%04x\n",
++           Base, ptr[0] | (ptr[1] << 8));
++#endif
++    (void) memcpy(Buf, (void *) (ptr + Offset), Len);
++    (void) munmap((caddr_t) ptr, mlen);
++#ifdef DEBUG
++    xf86MsgVerb(X_INFO, 3, "xf86ReadBIOS(%x, %x, Buf, %x)"
++                "-> %02x %02x %02x %02x...\n",
++                Base, Offset, Len, Buf[0], Buf[1], Buf[2], Buf[3]);
++#endif
++    return Len;
++}
++
++/* XXX This needs to be updated for the ND */
++
++/*
++** Find out whether the console driver provides memory mapping information
++** for the specified region and return the map_info pointer. Print a warning if required.
++*/
++static struct memAccess *
++checkMapInfo(Bool warn, int Region)
++{
++    struct memAccess *memAccP;
++
++    switch (Region) {
++    case VGA_REGION:
++        memAccP = &vgaMemInfo;
++        break;
++
++    case LINEAR_REGION:
++        memAccP = &linearMemInfo;
++        break;
++
++    case MMIO_REGION:
++        memAccP = &ioMemInfo;
++        break;
++
++    default:
++        return NULL;
++        break;
++    }
++
++    if (!memAccP->Checked) {
++        if (ioctl(xf86Info.consoleFd, memAccP->ioctl, &(memAccP->memInfo)) ==
++            -1) {
++            if (warn) {
++                xf86Msg(X_WARNING,
++                        "checkMapInfo: failed to get map info for region %d\n\t(%s)\n",
++                        Region, strerror(errno));
++            }
++        }
++        else {
++            if (memAccP->memInfo.u.map_info_mmap.map_offset != MAP_INFO_UNKNOWN)
++                memAccP->OK = TRUE;
++        }
++        memAccP->Checked = TRUE;
++    }
++    if (memAccP->OK) {
++        return memAccP;
++    }
++    else {
++        return NULL;
++    }
++}
++
++static void *
++xf86MapInfoMap(struct memAccess *memInfoP, void *Base, unsigned long Size)
++{
++    struct map_info *mapInfoP = &(memInfoP->memInfo);
++
++    if (mapInfoP->u.map_info_mmap.map_size == MAP_INFO_UNKNOWN) {
++        Size = (unsigned long) Base + Size;
++    }
++    else {
++        Size = mapInfoP->u.map_info_mmap.map_size;
++    }
++
++    switch (mapInfoP->method) {
++    case MAP_MMAP:
++        /* Need to remap if size is unknown because we may not have
++           mapped the whole region initially */
++        if (memInfoP->regionVirtBase == NULL ||
++            mapInfoP->u.map_info_mmap.map_size == MAP_INFO_UNKNOWN) {
++            if ((memInfoP->regionVirtBase =
++                 mmap((caddr_t) 0,
++                      Size,
++                      PROT_READ | PROT_WRITE,
++                      MAP_SHARED,
++                      xf86Info.consoleFd,
++                      (unsigned long) mapInfoP->u.map_info_mmap.map_offset))
++                == (void *) -1) {
++                FatalError
++                    ("xf86MapInfoMap: Failed to map memory at 0x%x\n\t%s\n",
++                     mapInfoP->u.map_info_mmap.map_offset, strerror(errno));
++            }
++            if (mapInfoP->u.map_info_mmap.internal_offset > 0)
++                memInfoP->regionVirtBase +=
++                    mapInfoP->u.map_info_mmap.internal_offset;
++        }
++        break;
++
++    default:
++        FatalError("xf86MapInfoMap: Unsuported mapping method\n");
++        break;
++    }
++
++    return (void *) ((int) memInfoP->regionVirtBase + (int) Base);
++}
++
++static void
++xf86MapInfoUnmap(struct memAccess *memInfoP, unsigned long Size)
++{
++    struct map_info *mapInfoP = &(memInfoP->memInfo);
++
++    switch (mapInfoP->method) {
++    case MAP_MMAP:
++        if (memInfoP->regionVirtBase != NULL) {
++            if (mapInfoP->u.map_info_mmap.map_size != MAP_INFO_UNKNOWN)
++                Size = mapInfoP->u.map_info_mmap.map_size;
++            munmap((caddr_t) memInfoP->regionVirtBase, Size);
++            memInfoP->regionVirtBase = NULL;
++        }
++        break;
++    default:
++        FatalError("xf86MapInfoMap: Unsuported mapping method\n");
++        break;
++    }
++}
++
++static void *
++armMapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int flags)
++{
++    struct memAccess *memInfoP;
++
++    if ((memInfoP = checkMapInfo(FALSE, Region)) != NULL) {
++        /*
++         ** xf86 passes in a physical address offset from the start
++         ** of physical memory, but xf86MapInfoMap expects an
++         ** offset from the start of the specified region - it gets
++         ** the physical address of the region from the display driver.
++         */
++        switch (Region) {
++        case LINEAR_REGION:
++            if (vgaPhysLinearBase) {
++                Base -= vgaPhysLinearBase;
++            }
++            break;
++        case VGA_REGION:
++            Base -= 0xA0000;
++            break;
++        }
++
++        base = xf86MapInfoMap(memInfoP, Base, Size);
++        return base;
++    }
++    return mapVidMem(ScreenNum, Base, Size, flags);
++}
++
++static void
++armUnmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    struct memAccess *memInfoP;
++
++    if ((memInfoP = checkMapInfo(FALSE, Region)) != NULL) {
++        xf86MapInfoUnmap(memInfoP, Base, Size);
++    }
++    unmapVidMem(ScreenNum, Base, Size);
++}
++
+ #ifdef USE_DEV_IO
+ static int IoFd = -1;
+ 
+diff --git a/hw/xfree86/os-support/bsd/i386_video.c b/hw/xfree86/os-support/bsd/i386_video.c
+index a38a7de27..7c49b057c 100644
+--- a/hw/xfree86/os-support/bsd/i386_video.c
++++ b/hw/xfree86/os-support/bsd/i386_video.c
+@@ -64,6 +64,20 @@ static int devMemFd = -1;
+ #define DEV_APERTURE "/dev/xf86"
+ #endif
+ 
++static void *mapVidMem(int, unsigned long, unsigned long, int);
++static void unmapVidMem(int, void *, unsigned long);
++
++#ifdef HAS_MTRR_SUPPORT
++static void *setWC(int, unsigned long, unsigned long, Bool, MessageType);
++static void undoWC(int, void *);
++static Bool cleanMTRR(void);
++#endif
++#if defined(HAS_MTRR_BUILTIN) && defined(__NetBSD__)
++static void *NetBSDsetWC(int, unsigned long, unsigned long, Bool,
++                           MessageType);
++static void NetBSDundoWC(int, void *);
++#endif
++
+ /*
+  * Check if /dev/mem can be mmap'd.  If it can't print a warning when
+  * "warn" is TRUE.
+@@ -153,12 +167,108 @@ void
+ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
+     checkDevMem(TRUE);
++    pVidMem->linearSupported = useDevMem;
++    pVidMem->mapMem = mapVidMem;
++    pVidMem->unmapMem = unmapVidMem;
+ 
+     pci_system_init_dev_mem(devMemFd);
+ 
+     pVidMem->initialised = TRUE;
+ }
+ 
++static void *
++mapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int flags)
++{
++    void *base;
++
++    checkDevMem(FALSE);
++
++    if (useDevMem) {
++        if (devMemFd < 0) {
++            FatalError("xf86MapVidMem: failed to open %s (%s)",
++                       DEV_MEM, strerror(errno));
++        }
++        base = mmap((caddr_t) 0, Size,
++                    (flags & VIDMEM_READONLY) ?
++                    PROT_READ : (PROT_READ | PROT_WRITE),
++                    MAP_FLAGS, devMemFd, (off_t) Base);
++        if (base == MAP_FAILED) {
++            FatalError("%s: could not mmap %s [s=%lx,a=%lx] (%s)",
++                       "xf86MapVidMem", DEV_MEM, Size, Base, strerror(errno));
++        }
++        return base;
++    }
++
++    /* else, mmap /dev/vga */
++    if ((unsigned long) Base < 0xA0000 || (unsigned long) Base >= 0xC0000) {
++        FatalError("%s: Address 0x%lx outside allowable range",
++                   "xf86MapVidMem", Base);
++    }
++    base = mmap(0, Size,
++                (flags & VIDMEM_READONLY) ?
++                PROT_READ : (PROT_READ | PROT_WRITE),
++                MAP_FLAGS, xf86Info.consoleFd, (unsigned long) Base - 0xA0000);
++    if (base == MAP_FAILED) {
++        FatalError("xf86MapVidMem: Could not mmap /dev/vga (%s)",
++                   strerror(errno));
++    }
++    return base;
++}
++
++static void
++unmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    munmap((caddr_t) Base, Size);
++}
++
++/*
++ * Read BIOS via mmap()ing DEV_MEM
++ */
++
++int
++xf86ReadBIOS(unsigned long Base, unsigned long Offset, unsigned char *Buf,
++             int Len)
++{
++    unsigned char *ptr;
++    int psize;
++    int mlen;
++
++    checkDevMem(TRUE);
++    if (devMemFd == -1) {
++        return -1;
++    }
++
++    psize = getpagesize();
++    Offset += Base & (psize - 1);
++    Base &= ~(psize - 1);
++    mlen = (Offset + Len + psize - 1) & ~(psize - 1);
++    ptr = (unsigned char *) mmap((caddr_t) 0, mlen, PROT_READ,
++                                 MAP_SHARED, devMemFd, (off_t) Base);
++    if ((long) ptr == -1) {
++        xf86Msg(X_WARNING,
++                "xf86ReadBIOS: %s mmap[s=%x,a=%lx,o=%lx] failed (%s)\n",
++                DEV_MEM, Len, Base, Offset, strerror(errno));
++#ifdef __OpenBSD__
++        if (Base < 0xa0000) {
++            xf86Msg(X_WARNING, SYSCTL_MSG2);
++        }
++#endif
++        return -1;
++    }
++#ifdef DEBUG
++    ErrorF("xf86ReadBIOS: BIOS at 0x%08x has signature 0x%04x\n",
++           Base, ptr[0] | (ptr[1] << 8));
++#endif
++    (void) memcpy(Buf, (void *) (ptr + Offset), Len);
++    (void) munmap((caddr_t) ptr, mlen);
++#ifdef DEBUG
++    xf86MsgVerb(X_INFO, 3, "xf86ReadBIOS(%x, %x, Buf, %x)"
++                "-> %02x %02x %02x %02x...\n",
++                Base, Offset, Len, Buf[0], Buf[1], Buf[2], Buf[3]);
++#endif
++    return Len;
++}
++
+ #ifdef USE_I386_IOPL
+ /***************************************************************************/
+ /* I/O Permissions section                                                 */
+diff --git a/hw/xfree86/os-support/bsd/ppc_video.c b/hw/xfree86/os-support/bsd/ppc_video.c
+index 5a58da19d..399b22af9 100644
+--- a/hw/xfree86/os-support/bsd/ppc_video.c
++++ b/hw/xfree86/os-support/bsd/ppc_video.c
+@@ -44,18 +44,74 @@
+ #define DEV_MEM "/dev/xf86"
+ #endif
+ 
++static void *ppcMapVidMem(int, unsigned long, unsigned long, int flags);
++static void ppcUnmapVidMem(int, void *, unsigned long);
++
+ Bool xf86EnableIO(void);
+ void xf86DisableIO(void);
+ 
+ void
+ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
++    pVidMem->linearSupported = TRUE;
++    pVidMem->mapMem = ppcMapVidMem;
++    pVidMem->unmapMem = ppcUnmapVidMem;
+     pVidMem->initialised = TRUE;
+     xf86EnableIO();
+ }
+ 
+ volatile unsigned char *ioBase = MAP_FAILED;
+ 
++static void *
++ppcMapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int flags)
++{
++    int fd = xf86Info.consoleFd;
++    void *base;
++
++#ifdef DEBUG
++    xf86MsgVerb(X_INFO, 3, "mapVidMem %lx, %lx, fd = %d", Base, Size, fd);
++#endif
++
++    base = mmap(0, Size,
++                (flags & VIDMEM_READONLY) ?
++                PROT_READ : (PROT_READ | PROT_WRITE), MAP_SHARED, fd, Base);
++    if (base == MAP_FAILED)
++        FatalError("%s: could not mmap screen [s=%lx,a=%lx] (%s)",
++                   "xf86MapVidMem", Size, Base, strerror(errno));
++
++    return base;
++}
++
++static void
++ppcUnmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    munmap(Base, Size);
++}
++
++int
++xf86ReadBIOS(unsigned long Base, unsigned long Offset, unsigned char *Buf,
++             int Len)
++{
++    int rv;
++    static int kmem = -1;
++
++    if (kmem == -1) {
++        kmem = open(DEV_MEM, 2);
++        if (kmem == -1) {
++            FatalError("xf86ReadBIOS: open %s", DEV_MEM);
++        }
++    }
++
++#ifdef DEBUG
++    xf86MsgVerb(X_INFO, 3, "xf86ReadBIOS() %lx %lx, %x\n", Base, Offset, Len);
++#endif
++
++    lseek(kmem, Base + Offset, 0);
++    rv = read(kmem, Buf, Len);
++
++    return rv;
++}
++
+ Bool
+ xf86EnableIO()
+ {
+diff --git a/hw/xfree86/os-support/bsd/sparc64_video.c b/hw/xfree86/os-support/bsd/sparc64_video.c
+index 3f8cccd19..7bea8e6c9 100644
+--- a/hw/xfree86/os-support/bsd/sparc64_video.c
++++ b/hw/xfree86/os-support/bsd/sparc64_video.c
+@@ -38,8 +38,48 @@
+ /* Video Memory Mapping section                                            */
+ /***************************************************************************/
+ 
++static void *sparc64MapVidMem(int, unsigned long, unsigned long, int);
++static void sparc64UnmapVidMem(int, void *, unsigned long);
++
+ void
+ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
++    pVidMem->linearSupported = TRUE;
++    pVidMem->mapMem = sparc64MapVidMem;
++    pVidMem->unmapMem = sparc64UnmapVidMem;
+     pVidMem->initialised = TRUE;
+ }
++
++static void *
++sparc64MapVidMem(int ScreenNum, unsigned long Base, unsigned long Size,
++                 int flags)
++{
++    int fd = xf86Info.consoleFd;
++    void *base;
++
++#ifdef DEBUG
++    xf86MsgVerb(X_INFO, 3, "mapVidMem %lx, %lx, fd = %d", Base, Size, fd);
++#endif
++
++    base = mmap(0, Size,
++                (flags & VIDMEM_READONLY) ?
++                PROT_READ : (PROT_READ | PROT_WRITE), MAP_SHARED, fd, Base);
++    if (base == MAP_FAILED)
++        FatalError("%s: could not mmap screen [s=%x,a=%x] (%s)",
++                   "xf86MapVidMem", Size, Base, strerror(errno));
++    return base;
++}
++
++static void
++sparc64UnmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    munmap(Base, Size);
++}
++
++int
++xf86ReadBIOS(unsigned long Base, unsigned long Offset, unsigned char *Buf,
++             int Len)
++{
++
++    return 0;
++}
+diff --git a/hw/xfree86/os-support/hurd/hurd_video.c b/hw/xfree86/os-support/hurd/hurd_video.c
+index ac24f1950..80b2fd11b 100644
+--- a/hw/xfree86/os-support/hurd/hurd_video.c
++++ b/hw/xfree86/os-support/hurd/hurd_video.c
+@@ -42,6 +42,68 @@
+ /**************************************************************************
+  * Video Memory Mapping section
+  ***************************************************************************/
++static void *
++mapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int Flags)
++{
++    mach_port_t device, mem_dev;
++    memory_object_t mem_obj;
++    kern_return_t err;
++    vm_address_t addr = (vm_address_t) 0;
++
++    err = get_privileged_ports(NULL, &device);
++    if (err) {
++        errno = err;
++        FatalError("xf86MapVidMem() can't get_privileged_ports. (%s)\n",
++                   strerror(errno));
++    }
++    err = device_open(device, D_READ | D_WRITE, "mem", &mem_dev);
++    mach_port_deallocate(mach_task_self(), device);
++    if (err) {
++        errno = err;
++        FatalError("xf86MapVidMem() can't device_open. (%s)\n",
++                   strerror(errno));
++    }
++
++    err =
++        device_map(mem_dev, VM_PROT_READ | VM_PROT_WRITE, Base, Size, &mem_obj,
++                   0);
++    if (err) {
++        errno = err;
++        FatalError("xf86MapVidMem() can't device_map. (%s)\n", strerror(errno));
++    }
++    err = vm_map(mach_task_self(), &addr, Size, 0,      /* mask */
++                 TRUE,          /* anywhere */
++                 mem_obj, (vm_offset_t) Base, FALSE,    /* copy on write */
++                 VM_PROT_READ | VM_PROT_WRITE,
++                 VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_SHARE);
++    mach_port_deallocate(mach_task_self(), mem_obj);
++    if (err) {
++        errno = err;
++        FatalError("xf86MapVidMem() can't vm_map.(mem_obj) (%s)\n",
++                   strerror(errno));
++    }
++    mach_port_deallocate(mach_task_self(), mem_dev);
++    if (err) {
++        errno = err;
++        FatalError
++            ("xf86MapVidMem() can't mach_port_deallocate.(mem_dev) (%s)\n",
++             strerror(errno));
++    }
++    return (void *) addr;
++}
++
++static void
++unmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    kern_return_t err = vm_deallocate(mach_task_self(), (int) Base, Size);
++
++    if (err) {
++        errno = err;
++        ErrorF("xf86UnMapVidMem: can't dealloc framebuffer space (%s)\n",
++               strerror(errno));
++    }
++    return;
++}
+ 
+ /**************************************************************************
+  * I/O Permissions section
+@@ -84,5 +146,8 @@ xf86DisableIO()
+ void
+ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
++    pVidMem->linearSupported = TRUE;
++    pVidMem->mapMem = mapVidMem;
++    pVidMem->unmapMem = unmapVidMem;
+     pVidMem->initialised = TRUE;
+ }
+diff --git a/hw/xfree86/os-support/linux/int10/linux.c b/hw/xfree86/os-support/linux/int10/linux.c
+index 6ca118f25..69fae6cec 100644
+--- a/hw/xfree86/os-support/linux/int10/linux.c
++++ b/hw/xfree86/os-support/linux/int10/linux.c
+@@ -290,6 +290,10 @@ xf86ExtendedInitInt10(int entityIndex, int Flags)
+             pInt->BIOSseg = V_BIOS >> 4;
+             break;
+         }
++        case BUS_ISA:
++	    if (!xf86int10GetBiosSegment(pInt, NULL))
++		goto error3;
++	    break;
+         default:
+             goto error3;
+         }
+diff --git a/hw/xfree86/os-support/linux/lnx_video.c b/hw/xfree86/os-support/linux/lnx_video.c
+index 04e45092a..2a929f9d5 100644
+--- a/hw/xfree86/os-support/linux/lnx_video.c
++++ b/hw/xfree86/os-support/linux/lnx_video.c
+@@ -69,12 +69,397 @@ extern int iopl(int __level);
+ /* Video Memory Mapping section                                            */
+ /***************************************************************************/
+ 
++static void *mapVidMem(int, unsigned long, unsigned long, int);
++static void unmapVidMem(int, void *, unsigned long);
++
++#if defined (__alpha__)
++extern void sethae(unsigned long hae);
++extern unsigned long _bus_base __P((void)) __attribute__ ((const));
++extern unsigned long _bus_base_sparse __P((void)) __attribute__ ((const));
++
++static void *mapVidMemSparse(int, unsigned long, unsigned long, int);
++extern axpDevice lnxGetAXP(void);
++static void unmapVidMemSparse(int, void *, unsigned long);
++static axpDevice axpSystem = -1;
++static Bool needSparse;
++static unsigned long hae_thresh;
++static unsigned long hae_mask;
++static unsigned long bus_base;
++#endif
++
++#define BUS_BASE 0L
++
++#ifdef HAS_MTRR_SUPPORT
++
++#define SPLIT_WC_REGIONS 1
++
++static void *setWC(int, unsigned long, unsigned long, Bool, MessageType);
++static void undoWC(int, void *);
++
++/* The file desc for /proc/mtrr. Once opened, left opened, and the mtrr
++   driver will clean up when we exit. */
++#define MTRR_FD_UNOPENED (-1)   /* We have yet to open /proc/mtrr */
++#define MTRR_FD_PROBLEM (-2)    /* We tried to open /proc/mtrr, but had
++                                   a problem. */
++static int mtrr_fd = MTRR_FD_UNOPENED;
++
++/* Open /proc/mtrr. FALSE on failure. Will always fail on Linux 2.0,
++   and will fail on Linux 2.2 with MTRR support configured out,
++   so verbosity should be chosen appropriately. */
++static Bool
++mtrr_open(int verbosity)
++{
++    /* Only report absence of /proc/mtrr once. */
++    static Bool warned = FALSE;
++
++    if (mtrr_fd == MTRR_FD_UNOPENED) {
++        mtrr_fd = open("/proc/mtrr", O_WRONLY);
++
++        if (mtrr_fd < 0)
++            mtrr_fd = MTRR_FD_PROBLEM;
++    }
++
++    if (mtrr_fd == MTRR_FD_PROBLEM) {
++        /* To make sure we only ever warn once, need to check
++           verbosity outside xf86MsgVerb */
++        if (!warned && verbosity <= xf86GetVerbosity()) {
++            xf86MsgVerb(X_WARNING, verbosity,
++                        "System lacks support for changing MTRRs\n");
++            warned = TRUE;
++        }
++
++        return FALSE;
++    }
++    else
++        return TRUE;
++}
++
++/*
++ * We maintain a list of WC regions for each physical mapping so they can
++ * be undone when unmapping.
++ */
++
++struct mtrr_wc_region {
++    struct mtrr_sentry sentry;
++    Bool added;                 /* added WC or removed it */
++    struct mtrr_wc_region *next;
++};
++
++static struct mtrr_wc_region *
++mtrr_cull_wc_region(int screenNum, unsigned long base, unsigned long size,
++                    MessageType from)
++{
++    /* Some BIOS writers thought that setting wc over the mmio
++       region of a graphics devices was a good idea. Try to fix
++       it. */
++
++    struct mtrr_gentry gent;
++    struct mtrr_wc_region *wcreturn = NULL, *wcr;
++    int count, ret = 0;
++
++    /* Linux 2.0 users should not get a warning without -verbose */
++    if (!mtrr_open(2))
++        return NULL;
++
++    for (gent.regnum = 0;
++         ioctl(mtrr_fd, MTRRIOC_GET_ENTRY, &gent) >= 0; gent.regnum++) {
++        if (gent.type != MTRR_TYPE_WRCOMB
++            || gent.base + gent.size <= base || base + size <= gent.base)
++            continue;
++
++        /* Found an overlapping region. Delete it. */
++
++        wcr = malloc(sizeof(*wcr));
++        if (!wcr)
++            return NULL;
++        wcr->sentry.base = gent.base;
++        wcr->sentry.size = gent.size;
++        wcr->sentry.type = MTRR_TYPE_WRCOMB;
++        wcr->added = FALSE;
++
++        count = 3;
++        while (count-- &&
++               (ret = ioctl(mtrr_fd, MTRRIOC_KILL_ENTRY, &(wcr->sentry))) < 0);
++
++        if (ret >= 0) {
++            xf86DrvMsg(screenNum, from,
++                       "Removed MMIO write-combining range "
++                       "(0x%lx,0x%lx)\n",
++                       (unsigned long) gent.base, (unsigned long) gent.size);
++            wcr->next = wcreturn;
++            wcreturn = wcr;
++            gent.regnum--;
++        }
++        else {
++            free(wcr);
++            xf86DrvMsgVerb(screenNum, X_WARNING, 0,
++                           "Failed to remove MMIO "
++                           "write-combining range (0x%lx,0x%lx)\n",
++                           (unsigned long)gent.base, (unsigned long) gent.size);
++        }
++    }
++    return wcreturn;
++}
++
++static struct mtrr_wc_region *
++mtrr_remove_offending(int screenNum, unsigned long base, unsigned long size,
++                      MessageType from)
++{
++    struct mtrr_gentry gent;
++    struct mtrr_wc_region *wcreturn = NULL, **wcr;
++
++    if (!mtrr_open(2))
++        return NULL;
++
++    wcr = &wcreturn;
++    for (gent.regnum = 0;
++         ioctl(mtrr_fd, MTRRIOC_GET_ENTRY, &gent) >= 0; gent.regnum++) {
++        if (gent.type == MTRR_TYPE_WRCOMB
++            && ((gent.base >= base && gent.base + gent.size < base + size) ||
++                (gent.base > base && gent.base + gent.size <= base + size))) {
++            *wcr = mtrr_cull_wc_region(screenNum, gent.base, gent.size, from);
++            if (*wcr)
++                gent.regnum--;
++            while (*wcr) {
++                wcr = &((*wcr)->next);
++            }
++        }
++    }
++    return wcreturn;
++}
++
++static struct mtrr_wc_region *
++mtrr_add_wc_region(int screenNum, unsigned long base, unsigned long size,
++                   MessageType from)
++{
++    struct mtrr_wc_region **wcr, *wcreturn, *curwcr;
++
++    /*
++     * There can be only one....
++     */
++
++    wcreturn = mtrr_remove_offending(screenNum, base, size, from);
++    wcr = &wcreturn;
++    while (*wcr) {
++        wcr = &((*wcr)->next);
++    }
++
++    /* Linux 2.0 should not warn, unless the user explicitly asks for
++       WC. */
++
++    if (!mtrr_open(from == X_CONFIG ? 0 : 2))
++        return wcreturn;
++
++    *wcr = curwcr = malloc(sizeof(**wcr));
++    if (!curwcr)
++        return wcreturn;
++
++    curwcr->sentry.base = base;
++    curwcr->sentry.size = size;
++    curwcr->sentry.type = MTRR_TYPE_WRCOMB;
++    curwcr->added = TRUE;
++    curwcr->next = NULL;
++
++#if SPLIT_WC_REGIONS
++    /*
++     * Splits up the write-combining region if it is not aligned on a
++     * size boundary.
++     */
++
++    {
++        unsigned long lbase, d_size = 1;
++        unsigned long n_size = size;
++        unsigned long n_base = base;
++
++        for (lbase = n_base, d_size = 1; !(lbase & 1);
++             lbase = lbase >> 1, d_size <<= 1);
++        while (d_size > n_size)
++            d_size = d_size >> 1;
++        DebugF("WC_BASE: 0x%lx WC_END: 0x%lx\n", base, base + d_size - 1);
++        n_base += d_size;
++        n_size -= d_size;
++        if (n_size) {
++            xf86DrvMsgVerb(screenNum, X_INFO, 3, "Splitting WC range: "
++                           "base: 0x%lx, size: 0x%lx\n", base, size);
++            curwcr->next = mtrr_add_wc_region(screenNum, n_base, n_size, from);
++        }
++        curwcr->sentry.size = d_size;
++    }
++
++        /*****************************************************************/
++#endif                          /* SPLIT_WC_REGIONS */
++
++    if (ioctl(mtrr_fd, MTRRIOC_ADD_ENTRY, &curwcr->sentry) >= 0) {
++        /* Avoid printing on every VT switch */
++        if (xf86ServerIsInitialising()) {
++            xf86DrvMsg(screenNum, from,
++                       "Write-combining range (0x%lx,0x%lx)\n", base, size);
++        }
++        return wcreturn;
++    }
++    else {
++        *wcr = curwcr->next;
++        free(curwcr);
++
++        /* Don't complain about the VGA region: MTRR fixed
++           regions aren't currently supported, but might be in
++           the future. */
++        if ((unsigned long) base >= 0x100000) {
++            xf86DrvMsgVerb(screenNum, X_WARNING, 0,
++                           "Failed to set up write-combining range "
++                           "(0x%lx,0x%lx)\n", base, size);
++        }
++        return wcreturn;
++    }
++}
++
++static void
++mtrr_undo_wc_region(int screenNum, struct mtrr_wc_region *wcr)
++{
++    struct mtrr_wc_region *p, *prev;
++
++    if (mtrr_fd >= 0) {
++        p = wcr;
++        while (p) {
++            if (p->added)
++                ioctl(mtrr_fd, MTRRIOC_DEL_ENTRY, &p->sentry);
++            prev = p;
++            p = p->next;
++            free(prev);
++        }
++    }
++}
++
++static void *
++setWC(int screenNum, unsigned long base, unsigned long size, Bool enable,
++      MessageType from)
++{
++    if (enable)
++        return mtrr_add_wc_region(screenNum, base, size, from);
++    else
++        return mtrr_cull_wc_region(screenNum, base, size, from);
++}
++
++static void
++undoWC(int screenNum, void *regioninfo)
++{
++    mtrr_undo_wc_region(screenNum, regioninfo);
++}
++
++#endif                          /* HAS_MTRR_SUPPORT */
++
+ void
+ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
++    pVidMem->linearSupported = TRUE;
++#ifdef __alpha__
++    if (axpSystem == -1) {
++        axpSystem = lnxGetAXP();
++        if ((needSparse = (_bus_base_sparse() > 0))) {
++            hae_thresh = xf86AXPParams[axpSystem].hae_thresh;
++            hae_mask = xf86AXPParams[axpSystem].hae_mask;
++        }
++        bus_base = _bus_base();
++    }
++    if (needSparse) {
++        xf86Msg(X_INFO, "Machine needs sparse mapping\n");
++        pVidMem->mapMem = mapVidMemSparse;
++        pVidMem->unmapMem = unmapVidMemSparse;
++    }
++    else {
++        xf86Msg(X_INFO, "Machine type has 8/16 bit access\n");
++        pVidMem->mapMem = mapVidMem;
++        pVidMem->unmapMem = unmapVidMem;
++    }
++#else
++    pVidMem->mapMem = mapVidMem;
++    pVidMem->unmapMem = unmapVidMem;
++#endif                          /* __alpha__ */
++
++#ifdef HAS_MTRR_SUPPORT
++    pVidMem->setWC = setWC;
++    pVidMem->undoWC = undoWC;
++#endif
+     pVidMem->initialised = TRUE;
+ }
+ 
++#ifdef __sparc__
++/* Basically, you simply cannot do this on Sparc.  You have to do something portable
++ * like use /dev/fb* or mmap() on /proc/bus/pci/X/Y nodes. -DaveM
++ */
++static void *
++mapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int flags)
++{
++    return NULL;
++}
++#else
++static void *
++mapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int flags)
++{
++    void *base;
++    int fd;
++    int mapflags = MAP_SHARED;
++    int prot;
++    memType realBase, alignOff;
++
++    realBase = Base & ~(getpagesize() - 1);
++    alignOff = Base - realBase;
++    DebugF("base: %lx, realBase: %lx, alignOff: %lx \n",
++           Base, realBase, alignOff);
++
++#if defined(__ia64__) || defined(__arm__) || defined(__s390__)
++#ifndef MAP_WRITECOMBINED
++#define MAP_WRITECOMBINED 0x00010000
++#endif
++#ifndef MAP_NONCACHED
++#define MAP_NONCACHED 0x00020000
++#endif
++    if (flags & VIDMEM_FRAMEBUFFER)
++        mapflags |= MAP_WRITECOMBINED;
++    else
++        mapflags |= MAP_NONCACHED;
++#endif
++
++#if 0
++    /* this will disappear when people upgrade their kernels */
++    fd = open(DEV_MEM,
++              ((flags & VIDMEM_READONLY) ? O_RDONLY : O_RDWR) | O_SYNC);
++#else
++    fd = open(DEV_MEM, (flags & VIDMEM_READONLY) ? O_RDONLY : O_RDWR);
++#endif
++    if (fd < 0) {
++        FatalError("xf86MapVidMem: failed to open " DEV_MEM " (%s)\n",
++                   strerror(errno));
++    }
++
++    if (flags & VIDMEM_READONLY)
++        prot = PROT_READ;
++    else
++        prot = PROT_READ | PROT_WRITE;
++
++    /* This requires linux-0.99.pl10 or above */
++    base = mmap((caddr_t) 0, Size + alignOff, prot, mapflags, fd,
++                (off_t) realBase + BUS_BASE);
++    close(fd);
++    if (base == MAP_FAILED) {
++        FatalError("xf86MapVidMem: Could not mmap framebuffer"
++                   " (0x%08lx,0x%lx) (%s)\n", Base, Size, strerror(errno));
++    }
++    DebugF("base: %lx aligned base: %lx\n", base, (char *) base + alignOff);
++    return (char *) base + alignOff;
++}
++#endif                          /* !(__sparc__) */
++
++static void
++unmapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    uintptr_t alignOff = (uintptr_t) Base
++        - ((uintptr_t) Base & ~(getpagesize() - 1));
++
++    DebugF("alignment offset: %lx\n", (unsigned long) alignOff);
++    munmap((void *) ((uintptr_t) Base - alignOff), (Size + alignOff));
++}
++
+ /***************************************************************************/
+ /* I/O Permissions section                                                 */
+ /***************************************************************************/
+@@ -166,3 +551,310 @@ xf86DisableIO(void)
+ 
+     ExtendedEnabled = FALSE;
+ }
++
++#if defined (__alpha__)
++
++#define vuip    volatile unsigned int *
++
++extern int readDense8(void *Base, register unsigned long Offset);
++extern int readDense16(void *Base, register unsigned long Offset);
++extern int readDense32(void *Base, register unsigned long Offset);
++extern void
++ writeDense8(int Value, void *Base, register unsigned long Offset);
++extern void
++ writeDense16(int Value, void *Base, register unsigned long Offset);
++extern void
++ writeDense32(int Value, void *Base, register unsigned long Offset);
++
++static int readSparse8(void *Base, register unsigned long Offset);
++static int readSparse16(void *Base, register unsigned long Offset);
++static int readSparse32(void *Base, register unsigned long Offset);
++static void
++ writeSparseNB8(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparseNB16(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparseNB32(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparse8(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparse16(int Value, void *Base, register unsigned long Offset);
++static void
++ writeSparse32(int Value, void *Base, register unsigned long Offset);
++
++#define DENSE_BASE	0x2ff00000000UL
++#define SPARSE_BASE	0x30000000000UL
++
++static unsigned long msb_set = 0;
++
++static void *
++mapVidMemSparse(int ScreenNum, unsigned long Base, unsigned long Size,
++                int flags)
++{
++    int fd, prot;
++    unsigned long ret, rets = 0;
++
++    static Bool was_here = FALSE;
++
++    if (!was_here) {
++        was_here = TRUE;
++
++        xf86WriteMmio8 = writeSparse8;
++        xf86WriteMmio16 = writeSparse16;
++        xf86WriteMmio32 = writeSparse32;
++        xf86WriteMmioNB8 = writeSparseNB8;
++        xf86WriteMmioNB16 = writeSparseNB16;
++        xf86WriteMmioNB32 = writeSparseNB32;
++        xf86ReadMmio8 = readSparse8;
++        xf86ReadMmio16 = readSparse16;
++        xf86ReadMmio32 = readSparse32;
++    }
++
++    fd = open(DEV_MEM, (flags & VIDMEM_READONLY) ? O_RDONLY : O_RDWR);
++    if (fd < 0) {
++        FatalError("xf86MapVidMem: failed to open " DEV_MEM " (%s)\n",
++                   strerror(errno));
++    }
++
++#if 0
++    xf86Msg(X_INFO, "mapVidMemSparse: try Base 0x%lx size 0x%lx flags 0x%x\n",
++            Base, Size, flags);
++#endif
++
++    if (flags & VIDMEM_READONLY)
++        prot = PROT_READ;
++    else
++        prot = PROT_READ | PROT_WRITE;
++
++    /* This requirers linux-0.99.pl10 or above */
++
++    /*
++     * Always do DENSE mmap, since read32/write32 currently require it.
++     */
++    ret = (unsigned long) mmap((caddr_t) (DENSE_BASE + Base), Size,
++                               prot, MAP_SHARED, fd, (off_t) (bus_base + Base));
++
++    /*
++     * Do SPARSE mmap only when MMIO and not MMIO_32BIT, or FRAMEBUFFER
++     * and SPARSE (which should require the use of read/write macros).
++     *
++     * By not SPARSE mmapping an 8MB framebuffer, we can save approx. 256K
++     * bytes worth of pagetable (32 pages).
++     */
++    if (((flags & VIDMEM_MMIO) && !(flags & VIDMEM_MMIO_32BIT)) ||
++        ((flags & VIDMEM_FRAMEBUFFER) && (flags & VIDMEM_SPARSE))) {
++        rets = (unsigned long) mmap((caddr_t) (SPARSE_BASE + (Base << 5)),
++                                    Size << 5, prot, MAP_SHARED, fd,
++                                    (off_t) _bus_base_sparse() + (Base << 5));
++    }
++
++    close(fd);
++
++    if (ret == (unsigned long) MAP_FAILED) {
++        FatalError("xf86MapVidMemSparse: Could not (dense) mmap fb (%s)\n",
++                   strerror(errno));
++    }
++
++    if (((flags & VIDMEM_MMIO) && !(flags & VIDMEM_MMIO_32BIT)) ||
++        ((flags & VIDMEM_FRAMEBUFFER) && (flags & VIDMEM_SPARSE))) {
++        if (rets == (unsigned long) MAP_FAILED ||
++            rets != (SPARSE_BASE + (Base << 5))) {
++            FatalError("mapVidMemSparse: Could not (sparse) mmap fb (%s)\n",
++                       strerror(errno));
++        }
++    }
++
++#if 1
++    if (rets)
++        xf86Msg(X_INFO, "mapVidMemSparse: mapped Base 0x%lx size 0x%lx"
++                " to DENSE at 0x%lx and SPARSE at 0x%lx\n",
++                Base, Size, ret, rets);
++    else
++        xf86Msg(X_INFO, "mapVidMemSparse: mapped Base 0x%lx size 0x%lx"
++                " to DENSE only at 0x%lx\n", Base, Size, ret);
++
++#endif
++    return (void *) ret;
++}
++
++static void
++unmapVidMemSparse(int ScreenNum, void *Base, unsigned long Size)
++{
++    unsigned long Offset = (unsigned long) Base - DENSE_BASE;
++
++#if 1
++    xf86Msg(X_INFO, "unmapVidMemSparse: unmapping Base 0x%lx Size 0x%lx\n",
++            Base, Size);
++#endif
++    /* Unmap DENSE always. */
++    munmap((caddr_t) Base, Size);
++
++    /* Unmap SPARSE always, and ignore error in case we did not map it. */
++    munmap((caddr_t) (SPARSE_BASE + (Offset << 5)), Size << 5);
++}
++
++static int
++readSparse8(void *Base, register unsigned long Offset)
++{
++    register unsigned long result, shift;
++    register unsigned long msb;
++
++    mem_barrier();
++    Offset += (unsigned long) Base - DENSE_BASE;
++    shift = (Offset & 0x3) << 3;
++    if (Offset >= (hae_thresh)) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++        if (msb_set != msb) {
++            sethae(msb);
++            msb_set = msb;
++        }
++    }
++
++    mem_barrier();
++    result = *(vuip) (SPARSE_BASE + (Offset << 5));
++    result >>= shift;
++    return 0xffUL & result;
++}
++
++static int
++readSparse16(void *Base, register unsigned long Offset)
++{
++    register unsigned long result, shift;
++    register unsigned long msb;
++
++    mem_barrier();
++    Offset += (unsigned long) Base - DENSE_BASE;
++    shift = (Offset & 0x2) << 3;
++    if (Offset >= hae_thresh) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++        if (msb_set != msb) {
++            sethae(msb);
++            msb_set = msb;
++        }
++    }
++
++    mem_barrier();
++    result = *(vuip) (SPARSE_BASE + (Offset << 5) + (1 << (5 - 2)));
++    result >>= shift;
++    return 0xffffUL & result;
++}
++
++static int
++readSparse32(void *Base, register unsigned long Offset)
++{
++    /* NOTE: this is really using DENSE. */
++    mem_barrier();
++    return *(vuip) ((unsigned long) Base + (Offset));
++}
++
++static void
++writeSparse8(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int b = Value & 0xffU;
++
++    write_mem_barrier();
++    Offset += (unsigned long) Base - DENSE_BASE;
++    if (Offset >= hae_thresh) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++        if (msb_set != msb) {
++            sethae(msb);
++            msb_set = msb;
++        }
++    }
++
++    write_mem_barrier();
++    *(vuip) (SPARSE_BASE + (Offset << 5)) = b * 0x01010101;
++}
++
++static void
++writeSparse16(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int w = Value & 0xffffU;
++
++    write_mem_barrier();
++    Offset += (unsigned long) Base - DENSE_BASE;
++    if (Offset >= hae_thresh) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++        if (msb_set != msb) {
++            sethae(msb);
++            msb_set = msb;
++        }
++    }
++
++    write_mem_barrier();
++    *(vuip) (SPARSE_BASE + (Offset << 5) + (1 << (5 - 2))) = w * 0x00010001;
++}
++
++static void
++writeSparse32(int Value, void *Base, register unsigned long Offset)
++{
++    /* NOTE: this is really using DENSE. */
++    write_mem_barrier();
++    *(vuip) ((unsigned long) Base + (Offset)) = Value;
++    return;
++}
++
++static void
++writeSparseNB8(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int b = Value & 0xffU;
++
++    Offset += (unsigned long) Base - DENSE_BASE;
++    if (Offset >= hae_thresh) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++        if (msb_set != msb) {
++            sethae(msb);
++            msb_set = msb;
++        }
++    }
++    *(vuip) (SPARSE_BASE + (Offset << 5)) = b * 0x01010101;
++}
++
++static void
++writeSparseNB16(int Value, void *Base, register unsigned long Offset)
++{
++    register unsigned long msb;
++    register unsigned int w = Value & 0xffffU;
++
++    Offset += (unsigned long) Base - DENSE_BASE;
++    if (Offset >= hae_thresh) {
++        msb = Offset & hae_mask;
++        Offset -= msb;
++        if (msb_set != msb) {
++            sethae(msb);
++            msb_set = msb;
++        }
++    }
++    *(vuip) (SPARSE_BASE + (Offset << 5) + (1 << (5 - 2))) = w * 0x00010001;
++}
++
++static void
++writeSparseNB32(int Value, void *Base, register unsigned long Offset)
++{
++    /* NOTE: this is really using DENSE. */
++    *(vuip) ((unsigned long) Base + (Offset)) = Value;
++    return;
++}
++
++void (*xf86WriteMmio8) (int Value, void *Base, unsigned long Offset)
++    = writeDense8;
++void (*xf86WriteMmio16) (int Value, void *Base, unsigned long Offset)
++    = writeDense16;
++void (*xf86WriteMmio32) (int Value, void *Base, unsigned long Offset)
++    = writeDense32;
++int (*xf86ReadMmio8) (void *Base, unsigned long Offset)
++    = readDense8;
++int (*xf86ReadMmio16) (void *Base, unsigned long Offset)
++    = readDense16;
++int (*xf86ReadMmio32) (void *Base, unsigned long Offset)
++    = readDense32;
++
++#endif                          /* __alpha__ */
+diff --git a/hw/xfree86/os-support/shared/vidmem.c b/hw/xfree86/os-support/shared/vidmem.c
+index a6bf677f5..f473293c7 100644
+--- a/hw/xfree86/os-support/shared/vidmem.c
++++ b/hw/xfree86/os-support/shared/vidmem.c
+@@ -42,7 +42,119 @@
+  * This file contains the common part of the video memory mapping functions
+  */
+ 
++/*
++ * Get a piece of the ScrnInfoRec.  At the moment, this is only used to hold
++ * the MTRR option information, but it is likely to be expanded if we do
++ * auto unmapping of memory at VT switch.
++ *
++ */
++
++typedef struct {
++    unsigned long size;
++    void *virtBase;
++    void *mtrrInfo;
++} MappingRec, *MappingPtr;
++
++typedef struct {
++    int numMappings;
++    MappingPtr *mappings;
++    Bool mtrrEnabled;
++    MessageType mtrrFrom;
++    Bool mtrrOptChecked;
++    ScrnInfoPtr pScrn;
++} VidMapRec, *VidMapPtr;
++
++static int vidMapIndex = -1;
++
++#define VIDMAPPTR(p) ((VidMapPtr)((p)->privates[vidMapIndex].ptr))
++
+ static VidMemInfo vidMemInfo = { FALSE, };
++static VidMapRec vidMapRec = { 0, NULL, TRUE, X_DEFAULT, FALSE, NULL };
++
++static VidMapPtr
++getVidMapRec(int scrnIndex)
++{
++    VidMapPtr vp;
++    ScrnInfoPtr pScrn;
++
++    if ((scrnIndex < 0) || !(pScrn = xf86Screens[scrnIndex]))
++        return &vidMapRec;
++
++    if (vidMapIndex < 0)
++        vidMapIndex = xf86AllocateScrnInfoPrivateIndex();
++
++    if (VIDMAPPTR(pScrn) != NULL)
++        return VIDMAPPTR(pScrn);
++
++    vp = pScrn->privates[vidMapIndex].ptr = xnfcalloc(sizeof(VidMapRec), 1);
++    vp->mtrrEnabled = TRUE;     /* default to enabled */
++    vp->mtrrFrom = X_DEFAULT;
++    vp->mtrrOptChecked = FALSE;
++    vp->pScrn = pScrn;
++    return vp;
++}
++
++static MappingPtr
++newMapping(VidMapPtr vp)
++{
++    vp->mappings = xnfrealloc(vp->mappings, sizeof(MappingPtr) *
++                              (vp->numMappings + 1));
++    vp->mappings[vp->numMappings] = xnfcalloc(sizeof(MappingRec), 1);
++    return vp->mappings[vp->numMappings++];
++}
++
++static MappingPtr
++findMapping(VidMapPtr vp, void *vbase, unsigned long size)
++{
++    int i;
++
++    for (i = 0; i < vp->numMappings; i++) {
++        if (vp->mappings[i]->virtBase == vbase && vp->mappings[i]->size == size)
++            return vp->mappings[i];
++    }
++    return NULL;
++}
++
++static void
++removeMapping(VidMapPtr vp, MappingPtr mp)
++{
++    int i, found = 0;
++
++    for (i = 0; i < vp->numMappings; i++) {
++        if (vp->mappings[i] == mp) {
++            found = 1;
++            free(vp->mappings[i]);
++        }
++        else if (found) {
++            vp->mappings[i - 1] = vp->mappings[i];
++        }
++    }
++    vp->numMappings--;
++    vp->mappings[vp->numMappings] = NULL;
++}
++
++enum { OPTION_MTRR };
++
++static const OptionInfoRec opts[] = {
++    {OPTION_MTRR, "mtrr", OPTV_BOOLEAN, {0}, FALSE},
++    {-1, NULL, OPTV_NONE, {0}, FALSE}
++};
++
++static void
++checkMtrrOption(VidMapPtr vp)
++{
++    if (!vp->mtrrOptChecked && vp->pScrn && vp->pScrn->options != NULL) {
++        OptionInfoPtr options;
++
++        options = xnfalloc(sizeof(opts));
++        (void) memcpy(options, opts, sizeof(opts));
++        xf86ProcessOptions(vp->pScrn->scrnIndex, vp->pScrn->options, options);
++        if (xf86GetOptValBool(options, OPTION_MTRR, &vp->mtrrEnabled))
++            vp->mtrrFrom = X_CONFIG;
++        free(options);
++        vp->mtrrOptChecked = TRUE;
++    }
++}
+ 
+ void
+ xf86InitVidMem(void)
+@@ -52,3 +164,96 @@ xf86InitVidMem(void)
+         xf86OSInitVidMem(&vidMemInfo);
+     }
+ }
++
++void *
++xf86MapVidMem(int ScreenNum, int Flags, unsigned long Base, unsigned long Size)
++{
++    void *vbase = NULL;
++    VidMapPtr vp;
++    MappingPtr mp;
++
++    if (((Flags & VIDMEM_FRAMEBUFFER) &&
++         (Flags & (VIDMEM_MMIO | VIDMEM_MMIO_32BIT))))
++        FatalError("Mapping memory with more than one type\n");
++
++    xf86InitVidMem();
++    if (!vidMemInfo.initialised || !vidMemInfo.mapMem)
++        return NULL;
++
++    vbase = vidMemInfo.mapMem(ScreenNum, Base, Size, Flags);
++
++    if (!vbase || vbase == (void *) -1)
++        return NULL;
++
++    vp = getVidMapRec(ScreenNum);
++    mp = newMapping(vp);
++    mp->size = Size;
++    mp->virtBase = vbase;
++
++    /*
++     * Check the "mtrr" option even when MTRR isn't supported to avoid
++     * warnings about unrecognised options.
++     */
++    checkMtrrOption(vp);
++
++    if (vp->mtrrEnabled && vidMemInfo.setWC) {
++        if (Flags & (VIDMEM_MMIO | VIDMEM_MMIO_32BIT))
++            mp->mtrrInfo =
++                vidMemInfo.setWC(ScreenNum, Base, Size, FALSE, vp->mtrrFrom);
++        else if (Flags & VIDMEM_FRAMEBUFFER)
++            mp->mtrrInfo =
++                vidMemInfo.setWC(ScreenNum, Base, Size, TRUE, vp->mtrrFrom);
++    }
++    return vbase;
++}
++
++void
++xf86UnMapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    VidMapPtr vp;
++    MappingPtr mp;
++
++    if (!vidMemInfo.initialised || !vidMemInfo.unmapMem) {
++        xf86DrvMsg(ScreenNum, X_WARNING,
++                   "xf86UnMapVidMem() called before xf86MapVidMem()\n");
++        return;
++    }
++
++    vp = getVidMapRec(ScreenNum);
++    mp = findMapping(vp, Base, Size);
++    if (!mp) {
++        xf86DrvMsg(ScreenNum, X_WARNING,
++                   "xf86UnMapVidMem: cannot find region for [%p,0x%lx]\n",
++                   Base, Size);
++        return;
++    }
++    if (vp->mtrrEnabled && vidMemInfo.undoWC && mp)
++        vidMemInfo.undoWC(ScreenNum, mp->mtrrInfo);
++
++    vidMemInfo.unmapMem(ScreenNum, Base, Size);
++    removeMapping(vp, mp);
++}
++
++Bool
++xf86CheckMTRR(int ScreenNum)
++{
++    VidMapPtr vp = getVidMapRec(ScreenNum);
++
++    /*
++     * Check the "mtrr" option even when MTRR isn't supported to avoid
++     * warnings about unrecognised options.
++     */
++    checkMtrrOption(vp);
++
++    if (vp->mtrrEnabled && vidMemInfo.setWC)
++        return TRUE;
++
++    return FALSE;
++}
++
++Bool
++xf86LinearVidMem(void)
++{
++    xf86InitVidMem();
++    return vidMemInfo.linearSupported;
++}
+diff --git a/hw/xfree86/os-support/solaris/sun_vid.c b/hw/xfree86/os-support/solaris/sun_vid.c
+index 2b48e66b0..55791dd0f 100644
+--- a/hw/xfree86/os-support/solaris/sun_vid.c
++++ b/hw/xfree86/os-support/solaris/sun_vid.c
+@@ -63,9 +63,109 @@
+ /* Video Memory Mapping section 					   */
+ /***************************************************************************/
+ 
++static char *apertureDevName = NULL;
++static int apertureDevFD_ro = -1;
++static int apertureDevFD_rw = -1;
++
++static Bool
++solOpenAperture(void)
++{
++    if (apertureDevName == NULL) {
++        apertureDevName = "/dev/xsvc";
++        if ((apertureDevFD_rw = open(apertureDevName, O_RDWR)) < 0) {
++            xf86MsgVerb(X_WARNING, 0,
++                        "solOpenAperture: failed to open %s (%s)\n",
++                        apertureDevName, strerror(errno));
++            apertureDevName = "/dev/fbs/aperture";
++            apertureDevFD_rw = open(apertureDevName, O_RDWR);
++        }
++        apertureDevFD_ro = open(apertureDevName, O_RDONLY);
++
++        if ((apertureDevFD_rw < 0) || (apertureDevFD_ro < 0)) {
++            xf86MsgVerb(X_WARNING, 0,
++                        "solOpenAperture: failed to open %s (%s)\n",
++                        apertureDevName, strerror(errno));
++            xf86MsgVerb(X_WARNING, 0,
++                        "solOpenAperture: either /dev/fbs/aperture"
++                        " or /dev/xsvc required\n");
++
++            apertureDevName = NULL;
++
++            if (apertureDevFD_rw >= 0) {
++                close(apertureDevFD_rw);
++            }
++            apertureDevFD_rw = -1;
++
++            if (apertureDevFD_ro >= 0) {
++                close(apertureDevFD_ro);
++            }
++            apertureDevFD_ro = -1;
++
++            return FALSE;
++        }
++    }
++    return TRUE;
++}
++
++static void *
++solMapVidMem(int ScreenNum, unsigned long Base, unsigned long Size, int Flags)
++{
++    void *base;
++    int fd;
++    int prot;
++
++    if (Flags & VIDMEM_READONLY) {
++        fd = apertureDevFD_ro;
++        prot = PROT_READ;
++    }
++    else {
++        fd = apertureDevFD_rw;
++        prot = PROT_READ | PROT_WRITE;
++    }
++
++    if (fd < 0) {
++        xf86DrvMsg(ScreenNum, X_ERROR,
++                   "solMapVidMem: failed to open %s (%s)\n",
++                   apertureDevName, strerror(errno));
++        return NULL;
++    }
++
++    base = mmap(NULL, Size, prot, MAP_SHARED, fd, (off_t) Base);
++
++    if (base == MAP_FAILED) {
++        xf86DrvMsg(ScreenNum, X_ERROR,
++                   "solMapVidMem: failed to mmap %s (0x%08lx,0x%lx) (%s)\n",
++                   apertureDevName, Base, Size, strerror(errno));
++        return NULL;
++    }
++
++    return base;
++}
++
++/* ARGSUSED */
++static void
++solUnMapVidMem(int ScreenNum, void *Base, unsigned long Size)
++{
++    if (munmap(Base, Size) != 0) {
++        xf86DrvMsgVerb(ScreenNum, X_WARNING, 0,
++                       "solUnMapVidMem: failed to unmap %s"
++                       " (0x%p,0x%lx) (%s)\n",
++                       apertureDevName, Base, Size, strerror(errno));
++    }
++}
++
+ _X_HIDDEN void
+ xf86OSInitVidMem(VidMemInfoPtr pVidMem)
+ {
++    pVidMem->linearSupported = solOpenAperture();
++    if (pVidMem->linearSupported) {
++        pVidMem->mapMem = solMapVidMem;
++        pVidMem->unmapMem = solUnMapVidMem;
++    }
++    else {
++        xf86MsgVerb(X_WARNING, 0,
++                    "xf86OSInitVidMem: linear memory access disabled\n");
++    }
+     pVidMem->initialised = TRUE;
+ }
+ 
+diff --git a/hw/xfree86/os-support/xf86OSpriv.h b/hw/xfree86/os-support/xf86OSpriv.h
+index ce1ec33a1..b56f45a3e 100644
+--- a/hw/xfree86/os-support/xf86OSpriv.h
++++ b/hw/xfree86/os-support/xf86OSpriv.h
+@@ -32,8 +32,19 @@
+ #ifndef _XF86OSPRIV_H
+ #define _XF86OSPRIV_H
+ 
++typedef void *(*MapMemProcPtr) (int, unsigned long, unsigned long, int);
++typedef void (*UnmapMemProcPtr) (int, void *, unsigned long);
++typedef void *(*SetWCProcPtr) (int, unsigned long, unsigned long, Bool,
++                                 MessageType);
++typedef void (*UndoWCProcPtr) (int, void *);
++
+ typedef struct {
+     Bool initialised;
++    MapMemProcPtr mapMem;
++    UnmapMemProcPtr unmapMem;
++    SetWCProcPtr setWC;
++    UndoWCProcPtr undoWC;
++    Bool linearSupported;
+ } VidMemInfo, *VidMemInfoPtr;
+ 
+ void xf86OSInitVidMem(VidMemInfoPtr);
+diff --git a/hw/xfree86/os-support/xf86_OSproc.h b/hw/xfree86/os-support/xf86_OSproc.h
+index 17607b04b..49f44f894 100644
+--- a/hw/xfree86/os-support/xf86_OSproc.h
++++ b/hw/xfree86/os-support/xf86_OSproc.h
+@@ -73,6 +73,24 @@
+  * stuff like sys/stat.h, etc. This casues problem for loadable modules.
+  */
+ 
++/*
++ * Flags for xf86MapVidMem().  Multiple flags can be or'd together.  The
++ * flags may be used as hints.  For example it would be permissible to
++ * enable write combining for memory marked only for framebuffer use.
++ */
++
++#define VIDMEM_FRAMEBUFFER	0x01    /* memory for framebuffer use */
++#define VIDMEM_MMIO		0x02    /* memory for I/O use */
++#define VIDMEM_MMIO_32BIT	0x04    /* memory accesses >= 32bit */
++#define VIDMEM_READSIDEEFFECT	0x08    /* reads can have side-effects */
++#define VIDMEM_SPARSE		0x10    /* sparse mapping required
++                                         * assumed when VIDMEM_MMIO is
++                                         * set. May be used with
++                                         * VIDMEM_FRAMEBUFFER) */
++#define VIDMEM_READONLY		0x20    /* read-only mapping
++                                         * used when reading BIOS images
++                                         * through xf86MapVidMem() */
++
+ /*
+  * OS-independent modem state flags for xf86SetSerialModemState() and
+  * xf86GetSerialModemState().
+@@ -112,6 +130,14 @@
+ _XFUNCPROTOBEGIN
+ 
+ /* public functions */
++extern _X_EXPORT Bool xf86LinearVidMem(void);
++extern _X_EXPORT _X_DEPRECATED Bool xf86CheckMTRR(int);
++extern _X_EXPORT _X_DEPRECATED void *xf86MapVidMem(int, int, unsigned long,
++                                                     unsigned long);
++extern _X_EXPORT _X_DEPRECATED void xf86UnMapVidMem(int, void *,
++                                                    unsigned long);
++extern _X_EXPORT int xf86ReadBIOS(unsigned long, unsigned long, unsigned char *,
++                                  int);
+ extern _X_EXPORT Bool xf86EnableIO(void);
+ extern _X_EXPORT void xf86DisableIO(void);
+ 
+diff --git a/hw/xfree86/sdksyms.sh b/hw/xfree86/sdksyms.sh
+index 7897aae22..8e620c22a 100755
+--- a/hw/xfree86/sdksyms.sh
++++ b/hw/xfree86/sdksyms.sh
+@@ -201,6 +201,7 @@ cat > sdksyms.c << EOF
+ 
+ 
+ /* mi/Makefile.am */
++#include "mibank.h"
+ #include "micmap.h"
+ #include "miline.h"
+ #include "mipointer.h"
+diff --git a/include/gc.h b/include/gc.h
+index 53f9c29e1..5d134012d 100644
+--- a/include/gc.h
++++ b/include/gc.h
+@@ -115,6 +115,8 @@ extern _X_EXPORT int CopyGC(GCPtr /*pgcSrc */ ,
+ extern _X_EXPORT int FreeGC(void *pGC,
+                             XID gid);
+ 
++extern _X_EXPORT GCPtr CreateScratchGC(ScreenPtr pScreen, unsigned depth);
++
+ extern _X_EXPORT void FreeGCperDepth(int /*screenNum */ );
+ 
+ extern _X_EXPORT Bool CreateGCperDepth(int /*screenNum */ );
+diff --git a/mi/Makefile.am b/mi/Makefile.am
+index 110c3f5dd..828c76bea 100644
+--- a/mi/Makefile.am
++++ b/mi/Makefile.am
+@@ -1,9 +1,9 @@
+ noinst_LTLIBRARIES = libmi.la
+ 
+ if XORG
+-sdk_HEADERS = micmap.h miline.h mipointer.h mi.h \
+-              migc.h mipointrst.h mizerarc.h micoord.h \
+-              mistruct.h mioverlay.h
++sdk_HEADERS = mibank.h micmap.h miline.h mipointer.h mi.h mibstore.h \
++              migc.h mipointrst.h mizerarc.h micoord.h mifillarc.h \
++              mispans.h miwideline.h mistruct.h mifpoly.h mioverlay.h
+ endif
+ 
+ AM_CFLAGS = $(DIX_CFLAGS)
+@@ -11,6 +11,8 @@ AM_CFLAGS = $(DIX_CFLAGS)
+ libmi_la_SOURCES = 	\
+ 	mi.h		\
+ 	miarc.c		\
++	mibank.c	\
++	mibank.h	\
+ 	mibitblt.c	\
+ 	micmap.c	\
+ 	micmap.h	\
+diff --git a/mi/meson.build b/mi/meson.build
+index 73b196ad0..dcc8c5a8b 100644
+--- a/mi/meson.build
++++ b/mi/meson.build
+@@ -1,5 +1,6 @@
+ srcs_mi = [
+     'miarc.c',
++    'mibank.c',
+     'mibitblt.c',
+     'micmap.c',
+     'micopy.c',
+@@ -30,6 +31,7 @@ srcs_mi = [
+ ]
+ 
+ hdrs_mi = [
++  'mibank.h',
+   'micmap.h',
+   'micoord.h',
+   'migc.h',
+diff --git a/mi/mibank.c b/mi/mibank.c
+new file mode 100644
+index 000000000..4df870d8f
+--- /dev/null
++++ b/mi/mibank.c
+@@ -0,0 +1,2306 @@
++/*
++ * Copyright 1997 through 2004 by Marc Aurele La France (TSI @ UQV), tsi@xfree86.org
++ *
++ * Permission to use, copy, modify, distribute, and sell this software and its
++ * documentation for any purpose is hereby granted without fee, provided that
++ * the above copyright notice appear in all copies and that both that copyright
++ * notice and this permission notice appear in supporting documentation, and
++ * that the name of Marc Aurele La France not be used in advertising or
++ * publicity pertaining to distribution of the software without specific,
++ * written prior permission.  Marc Aurele La France makes no representations
++ * about the suitability of this software for any purpose.  It is provided
++ * "as-is" without express or implied warranty.
++ *
++ * MARC AURELE LA FRANCE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
++ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  IN NO
++ * EVENT SHALL MARC AURELE LA FRANCE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
++ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
++ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
++ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++/*
++ * Copyright 1990,91,92,93 by Thomas Roell, Germany.
++ * Copyright 1991,92,93    by SGCS (Snitily Graphics Consulting Services), USA.
++ *
++ * Permission to use, copy, modify, distribute, and sell this software
++ * and its documentation for any purpose is hereby granted without fee,
++ * provided that the above copyright notice appear in all copies and
++ * that both that copyright notice and this  permission notice appear
++ * in supporting documentation, and that the name of Thomas Roell nor
++ * SGCS be used in advertising or publicity pertaining to distribution
++ * of the software without specific, written prior permission.
++ * Thomas Roell nor SGCS makes no representations about the suitability
++ * of this software for any purpose. It is provided "as is" without
++ * express or implied warranty.
++ *
++ * THOMAS ROELL AND SGCS DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS
++ * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
++ * FITNESS, IN NO EVENT SHALL THOMAS ROELL OR SGCS BE LIABLE FOR ANY
++ * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
++ * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
++ * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
++ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++
++/*
++ * This thing originated from an idea of Edwin Goei and his bank switching
++ * code for the DEC TX board.
++ */
++
++/*
++ * Heavily modified for the XFree86 Project to turn this into an mi wrapper.
++ * ---  Marc Aurele La France (tsi@xfree86.org)
++ */
++
++/*
++ * "Heavily modified", indeed!  By the time this is finalized, there probably
++ * won't be much left of Roell's code...
++ *
++ * Miscellaneous notes:
++ * - Pixels with imbedded bank boundaries are required to be off-screen.  There
++ *   >might< be a way to fool the underlying framebuffer into dealing with
++ *   partial pixels.
++ * - Plans to generalise this to do (hardware) colour plane switching have been
++ *   dropped due to colour flashing concerns.
++ *
++ * TODO:
++ * - Re-instate shared and double banking for framebuffers whose pixmap formats
++ *   don't describe how the server "sees" the screen.
++ * - Remove remaining assumptions that a pixmap's devPrivate field points
++ *   directly to its pixel data.
++ */
++
++/* #define NO_ALLOCA 1 */
++
++#ifdef HAVE_DIX_CONFIG_H
++#include <dix-config.h>
++#endif
++
++#include "servermd.h"
++#include "gcstruct.h"
++#include "pixmapstr.h"
++#include "scrnintstr.h"
++#include "windowstr.h"
++#include "mi.h"
++#include "mibank.h"
++
++#define BANK_SINGLE 0
++#define BANK_SHARED 1
++#define BANK_DOUBLE 2
++#define BANK_NOBANK 3
++
++typedef struct _miBankScreen
++{
++    miBankInfoRec BankInfo;
++    unsigned int  nBankBPP;
++    unsigned int  type;
++
++    unsigned long nBitsPerBank;
++    unsigned long nBitsPerScanline;
++    unsigned long nPixelsPerScanlinePadUnit;
++
++    PixmapPtr     pScreenPixmap;
++    PixmapPtr     pBankPixmap;
++    GCPtr         pBankGC;
++
++    int           nBanks, maxRects;
++    RegionPtr     *pBanks;
++
++    void          *pbits;
++
++    /*
++     * Screen Wrappers
++     */
++    CreateScreenResourcesProcPtr  CreateScreenResources;
++    ModifyPixmapHeaderProcPtr     ModifyPixmapHeader;
++    CloseScreenProcPtr            CloseScreen;
++    GetImageProcPtr               GetImage;
++    GetSpansProcPtr               GetSpans;
++    CreateGCProcPtr               CreateGC;
++    CopyWindowProcPtr             CopyWindow;
++} miBankScreenRec, *miBankScreenPtr;
++
++typedef struct _miBankGC
++{
++    GCOps     *wrappedOps,   *unwrappedOps;
++    GCFuncs   *wrappedFuncs, *unwrappedFuncs;
++
++    Bool      fastCopy, fastPlane;
++
++    RegionPtr pBankedClips[1];
++} miBankGCRec, *miBankGCPtr;
++
++typedef struct _miBankQueue
++{
++    Bool           fastBlit;
++    unsigned short srcBankNo;
++    unsigned short dstBankNo;
++    short          x;
++    short          y;
++    short          w;
++    short          h;
++} miBankQueue;
++
++/*
++ * CAVEAT:  This banking scheme requires that the DDX store Pixmap data in the
++ *          server's address space.
++ */
++
++#define ModifyPixmap(_pPix, _width, _devKind, _pbits) \
++    (*pScreen->ModifyPixmapHeader)((_pPix), \
++        (_width), -1, -1, -1, (_devKind), (_pbits))
++
++#define SET_SINGLE_BANK(_pPix, _width, _devKind, _no) \
++    ModifyPixmap(_pPix, _width, _devKind, \
++        (char *)pScreenPriv->BankInfo.pBankA + \
++        (*pScreenPriv->BankInfo.SetSourceAndDestinationBanks)(pScreen, (_no)) - \
++        (pScreenPriv->BankInfo.BankSize * (_no)))
++
++#define SET_SOURCE_BANK(_pPix, _width, _devKind, _no) \
++    ModifyPixmap(_pPix, _width, _devKind, \
++        (char *)pScreenPriv->BankInfo.pBankA + \
++        (*pScreenPriv->BankInfo.SetSourceBank)(pScreen, (_no)) - \
++        (pScreenPriv->BankInfo.BankSize * (_no)))
++
++#define SET_DESTINATION_BANK(_pPix, _width, _devKind, _no) \
++    ModifyPixmap(_pPix, _width, _devKind, \
++        (char *)pScreenPriv->BankInfo.pBankB + \
++        (*pScreenPriv->BankInfo.SetDestinationBank)(pScreen, (_no)) - \
++        (pScreenPriv->BankInfo.BankSize * (_no)))
++
++#define xalloc_ARRAY(atype, ntype) xnfcalloc((ntype), sizeof(atype))
++
++static DevPrivateKeyRec miBankScreenKey;
++static DevPrivateKeyRec miBankGCKey;
++
++static unsigned long miBankGeneration = 0;
++
++#define BANK_SCRPRIVLVAL dixLookupPrivate(&pScreen->devPrivates, &miBankScreenKey)
++
++#define BANK_SCRPRIVATE ((miBankScreenPtr)(BANK_SCRPRIVLVAL))
++
++#define BANK_GCPRIVLVAL(pGC) dixLookupPrivate(&(pGC)->devPrivates, &miBankGCKey)
++
++#define BANK_GCPRIVATE(pGC) ((miBankGCPtr)(BANK_GCPRIVLVAL(pGC)))
++
++#define PIXMAP_STATUS(_pPix) \
++    void *pbits = (_pPix)->devPrivate.ptr
++
++#define PIXMAP_SAVE(_pPix) \
++    PIXMAP_STATUS(_pPix); \
++    if (pbits == (void *)pScreenPriv) \
++        (_pPix)->devPrivate.ptr = pScreenPriv->pbits
++
++#define PIXMAP_RESTORE(_pPix) \
++    (_pPix)->devPrivate.ptr = pbits
++
++#define BANK_SAVE \
++    int width   = pScreenPriv->pBankPixmap->drawable.width; \
++    int devKind = pScreenPriv->pBankPixmap->devKind; \
++    PIXMAP_SAVE(pScreenPriv->pBankPixmap)
++
++#define BANK_RESTORE \
++    pScreenPriv->pBankPixmap->drawable.width = width; \
++    pScreenPriv->pBankPixmap->devKind = devKind; \
++    PIXMAP_RESTORE(pScreenPriv->pBankPixmap)
++
++#define SCREEN_STATUS \
++    PIXMAP_STATUS(pScreenPriv->pScreenPixmap)
++
++#define SCREEN_SAVE \
++    PIXMAP_SAVE(pScreenPriv->pScreenPixmap)
++
++#define SCREEN_RESTORE \
++    PIXMAP_RESTORE(pScreenPriv->pScreenPixmap)
++
++#define SCREEN_INIT \
++    miBankScreenPtr pScreenPriv = BANK_SCRPRIVATE
++
++#define SCREEN_UNWRAP(field) \
++    pScreen->field = pScreenPriv->field
++
++#define SCREEN_WRAP(field, wrapper) \
++    pScreenPriv->field = pScreen->field; \
++    pScreen->field     = wrapper
++
++#define GC_INIT(pGC) \
++    miBankGCPtr pGCPriv = BANK_GCPRIVATE(pGC)
++
++#define GC_UNWRAP(pGC) \
++    pGCPriv->unwrappedOps   = (pGC)->ops; \
++    pGCPriv->unwrappedFuncs = (pGC)->funcs; \
++    (pGC)->ops              = pGCPriv->wrappedOps; \
++    (pGC)->funcs            = pGCPriv->wrappedFuncs
++
++#define GC_WRAP(pGC) \
++    pGCPriv->wrappedOps   = (pGC)->ops; \
++    pGCPriv->wrappedFuncs = (pGC)->funcs; \
++    (pGC)->ops            = pGCPriv->unwrappedOps; \
++    (pGC)->funcs          = pGCPriv->unwrappedFuncs
++
++#define IS_BANKED(pDrawable) \
++    ((pbits == (void *)pScreenPriv) && \
++     (((DrawablePtr)(pDrawable))->type == DRAWABLE_WINDOW))
++
++#define CLIP_SAVE \
++    RegionPtr pOrigCompositeClip = pGC->pCompositeClip
++
++#define CLIP_RESTORE \
++    pGC->pCompositeClip = pOrigCompositeClip
++
++#define GCOP_INIT \
++    ScreenPtr pScreen = pGC->pScreen; \
++    SCREEN_INIT; \
++    GC_INIT(pGC)
++
++#define GCOP_UNWRAP \
++    GC_UNWRAP(pGC)
++
++#define GCOP_WRAP \
++    GC_WRAP(pGC)
++
++#define GCOP_TOP_PART \
++    for (i = 0;  i < pScreenPriv->nBanks;  i++) \
++    { \
++        if (!(pGC->pCompositeClip = pGCPriv->pBankedClips[i])) \
++            continue; \
++        GCOP_UNWRAP; \
++        SET_SINGLE_BANK(pScreenPriv->pScreenPixmap, -1, -1, i)
++
++#define GCOP_BOTTOM_PART \
++        GCOP_WRAP; \
++    }
++
++#define GCOP_SIMPLE(statement) \
++    if (nArray > 0) \
++    { \
++        GCOP_INIT; \
++        SCREEN_SAVE; \
++        if (!IS_BANKED(pDrawable)) \
++        { \
++            GCOP_UNWRAP; \
++            statement; \
++            GCOP_WRAP; \
++        } \
++        else \
++        { \
++            int i; \
++            CLIP_SAVE; \
++            GCOP_TOP_PART; \
++            statement; \
++            GCOP_BOTTOM_PART; \
++            CLIP_RESTORE; \
++        } \
++        SCREEN_RESTORE; \
++    }
++
++#define GCOP_0D_ARGS mode,
++#define GCOP_1D_ARGS
++#define GCOP_2D_ARGS shape, mode,
++
++#define GCOP_COMPLEX(aop, atype) \
++    if (nArray > 0) \
++    { \
++        GCOP_INIT; \
++        SCREEN_SAVE; \
++        if (!IS_BANKED(pDrawable)) \
++        { \
++            GCOP_UNWRAP; \
++            (*pGC->ops->aop)(pDrawable, pGC, GCOP_ARGS nArray, pArray); \
++            GCOP_WRAP; \
++        } \
++        else \
++        { \
++            atype *aarg = pArray, *acopy; \
++            int   i; \
++            CLIP_SAVE; \
++            if ((acopy = xalloc_ARRAY(atype, nArray))) \
++                aarg = acopy; \
++            GCOP_TOP_PART; \
++            if (acopy) \
++                memcpy(acopy, pArray, nArray * sizeof(atype)); \
++            (*pGC->ops->aop)(pDrawable, pGC, GCOP_ARGS nArray, aarg); \
++            GCOP_BOTTOM_PART; \
++            free(acopy); \
++            CLIP_RESTORE; \
++        } \
++        SCREEN_RESTORE; \
++    }
++
++/*********************
++ * Utility functions *
++ *********************/
++
++static int
++miBankOf(
++    miBankScreenPtr pScreenPriv,
++    int             x,
++    int             y
++)
++{
++    int iBank = ((x * (int)pScreenPriv->nBankBPP) +
++                 (y * (long)pScreenPriv->nBitsPerScanline)) /
++                (long)pScreenPriv->nBitsPerBank;
++
++    if (iBank < 0)
++        iBank = 0;
++    else if (iBank >= pScreenPriv->nBanks)
++        iBank = pScreenPriv->nBanks - 1;
++
++    return iBank;
++}
++
++#define FirstBankOf(_x, _y) miBankOf(pScreenPriv, (_x), (_y))
++#define  LastBankOf(_x, _y) miBankOf(pScreenPriv, (_x) - 1, (_y))
++
++/* Determine banking type from the BankInfoRec */
++static unsigned int
++miBankDeriveType(
++    ScreenPtr     pScreen,
++    miBankInfoPtr pBankInfo
++)
++{
++    unsigned int type;
++
++    if (pBankInfo->pBankA == pBankInfo->pBankB)
++    {
++        if (pBankInfo->SetSourceBank == pBankInfo->SetDestinationBank)
++        {
++            if (pBankInfo->SetSourceAndDestinationBanks !=
++                pBankInfo->SetSourceBank)
++                return BANK_NOBANK;
++
++            type = BANK_SINGLE;
++        }
++        else
++        {
++            if (pBankInfo->SetSourceAndDestinationBanks ==
++                pBankInfo->SetDestinationBank)
++                return BANK_NOBANK;
++            if (pBankInfo->SetSourceAndDestinationBanks ==
++                pBankInfo->SetSourceBank)
++                return BANK_NOBANK;
++
++            type = BANK_SHARED;
++        }
++    }
++    else
++    {
++        if ((unsigned long)abs((char *)pBankInfo->pBankA -
++                               (char *)pBankInfo->pBankB) < pBankInfo->BankSize)
++            return BANK_NOBANK;
++
++        if (pBankInfo->SetSourceBank == pBankInfo->SetDestinationBank)
++        {
++            if (pBankInfo->SetSourceAndDestinationBanks !=
++                pBankInfo->SetSourceBank)
++                return BANK_NOBANK;
++        }
++        else
++        {
++            if (pBankInfo->SetSourceAndDestinationBanks ==
++                pBankInfo->SetDestinationBank)
++                return BANK_NOBANK;
++        }
++
++        type = BANK_DOUBLE;
++    }
++
++    /*
++     * Internal limitation:  Currently, only single banking is supported when
++     * the pixmap format and the screen's pixel format are different.  The
++     * following test is only partially successful at detecting this condition.
++     */
++    if (pBankInfo->nBankDepth != pScreen->rootDepth)
++        type = BANK_SINGLE;
++
++    return type;
++}
++
++/* Least common multiple */
++static unsigned int
++miLCM(
++    unsigned int x,
++    unsigned int y
++)
++{
++    unsigned int m = x, n = y, o;
++
++    while ((o = m % n))
++    {
++        m = n;
++        n = o;
++    }
++
++    return (x / n) * y;
++}
++
++/******************
++ * GCOps wrappers *
++ ******************/
++
++static void
++miBankFillSpans(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         nArray,
++    DDXPointPtr pptInit,
++    int         *pwidthInit,
++    int         fSorted
++)
++{
++    GCOP_SIMPLE((*pGC->ops->FillSpans)(pDrawable, pGC,
++        nArray, pptInit, pwidthInit, fSorted));
++}
++
++static void
++miBankSetSpans(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    char        *psrc,
++    DDXPointPtr ppt,
++    int         *pwidth,
++    int         nArray,
++    int         fSorted
++)
++{
++    GCOP_SIMPLE((*pGC->ops->SetSpans)(pDrawable, pGC, psrc,
++        ppt, pwidth, nArray, fSorted));
++}
++
++static void
++miBankPutImage(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         depth,
++    int         x,
++    int         y,
++    int         w,
++    int         h,
++    int         leftPad,
++    int         format,
++    char        *pImage
++)
++{
++    if ((w > 0) && (h > 0))
++    {
++        GCOP_INIT;
++        SCREEN_SAVE;
++
++        if (!IS_BANKED(pDrawable))
++        {
++            GCOP_UNWRAP;
++
++            (*pGC->ops->PutImage)(pDrawable, pGC, depth, x, y, w, h,
++                leftPad, format, pImage);
++
++            GCOP_WRAP;
++        }
++        else
++        {
++            int i, j;
++
++            CLIP_SAVE;
++
++            i = FirstBankOf(x + pDrawable->x,     y + pDrawable->y);
++            j =  LastBankOf(x + pDrawable->x + w, y + pDrawable->y + h);
++            for (;  i <= j;  i++)
++            {
++                if (!(pGC->pCompositeClip = pGCPriv->pBankedClips[i]))
++                    continue;
++
++                GCOP_UNWRAP;
++
++                SET_SINGLE_BANK(pScreenPriv->pScreenPixmap, -1, -1, i);
++
++                (*pGC->ops->PutImage)(pDrawable, pGC, depth, x, y, w, h,
++                    leftPad, format, pImage);
++
++                GCOP_WRAP;
++            }
++
++            CLIP_RESTORE;
++        }
++
++        SCREEN_RESTORE;
++    }
++}
++
++/*
++ * Here the CopyArea/CopyPlane wrappers.  First off, we have to clip against
++ * the source in order to make the minimal number of copies in case of slow
++ * systems.  Also the exposure handling is quite tricky.  Special attention
++ * is to be given to the way the copies are sequenced.  The list of boxes after
++ * the source clip is used to build a workqueue, that contains the atomic
++ * copies (i.e. only from one bank to one bank).  Doing so produces a minimal
++ * list of things to do.
++ */
++static RegionPtr
++miBankCopy(
++    DrawablePtr   pSrc,
++    DrawablePtr   pDst,
++    GCPtr         pGC,
++    int           srcx,
++    int           srcy,
++    int           w,
++    int           h,
++    int           dstx,
++    int           dsty,
++    unsigned long plane,
++    Bool          SinglePlane
++)
++{
++    int         cx1, cy1, cx2, cy2;
++    int         ns, nd, nse, nde, dx, dy, xorg = 0, yorg = 0;
++    int         maxWidth = 0, maxHeight = 0, paddedWidth = 0;
++    int         nBox, nBoxClipSrc, nBoxClipDst, nQueue;
++    BoxPtr      pBox, pBoxClipSrc, pBoxClipDst;
++    BoxRec      fastBox, ccBox;
++    RegionPtr   ret = NULL, prgnSrcClip = NULL;
++    RegionRec   rgnDst;
++    char        *pImage = NULL;
++    miBankQueue *pQueue, *pQueueNew, *Queue;
++    miBankQueue *pQueueTmp, *pQueueNext, *pQueueBase;
++    Bool        fastBlit, freeSrcClip, fastClip;
++    Bool        fExpose = FALSE, fastExpose = FALSE;
++
++    GCOP_INIT;
++    SCREEN_SAVE;
++
++    if (!IS_BANKED(pSrc) && !IS_BANKED(pDst))
++    {
++        GCOP_UNWRAP;
++
++        if (SinglePlane)
++            ret = (*pGC->ops->CopyPlane)(pSrc, pDst, pGC,
++                srcx, srcy, w, h, dstx, dsty, plane);
++        else
++            ret = (*pGC->ops->CopyArea)(pSrc, pDst, pGC,
++                srcx, srcy, w, h, dstx, dsty);
++
++        GCOP_WRAP;
++    }
++    else if (!IS_BANKED(pDst))
++    {
++        fExpose = pGC->fExpose;
++        pGC->fExpose = FALSE;
++
++        xorg = pSrc->x;
++        yorg = pSrc->y;
++        dx   = dstx - srcx;
++        dy   = dsty - srcy;
++        srcx += xorg;
++        srcy += yorg;
++
++        ns = FirstBankOf(srcx,     srcy);
++        nse = LastBankOf(srcx + w, srcy + h);
++        for (;  ns <= nse;  ns++)
++        {
++            if (!pScreenPriv->pBanks[ns])
++                continue;
++
++            nBox = REGION_NUM_RECTS(pScreenPriv->pBanks[ns]);
++            pBox = REGION_RECTS(pScreenPriv->pBanks[ns]);
++
++            for (;  nBox--;  pBox++)
++            {
++                cx1 = max(pBox->x1, srcx);
++                cy1 = max(pBox->y1, srcy);
++                cx2 = min(pBox->x2, srcx + w);
++                cy2 = min(pBox->y2, srcy + h);
++
++                if ((cx1 >= cx2) || (cy1 >= cy2))
++                    continue;
++
++                GCOP_UNWRAP;
++
++                SET_SINGLE_BANK(pScreenPriv->pScreenPixmap, -1, -1, ns);
++
++                if (SinglePlane)
++                    (*pGC->ops->CopyPlane)(pSrc, pDst, pGC,
++                        cx1 - xorg, cy1 - yorg,
++                        cx2 - cx1, cy2 - cy1,
++                        cx1 + dx - xorg, cy1 + dy - yorg, plane);
++                else
++                    (*pGC->ops->CopyArea)(pSrc, pDst, pGC,
++                        cx1 - xorg, cy1 - yorg,
++                        cx2 - cx1, cy2 - cy1,
++                        cx1 + dx - xorg, cy1 + dy - yorg);
++
++                GCOP_WRAP;
++            }
++        }
++
++        pGC->fExpose = fExpose;
++        srcx -= xorg;
++        srcy -= yorg;
++    }
++    else if (!IS_BANKED(pSrc))
++    {
++        CLIP_SAVE;
++
++        if (pGC->miTranslate)
++        {
++            xorg = pDst->x;
++            yorg = pDst->y;
++        }
++        dx = srcx - dstx;
++        dy = srcy - dsty;
++        dstx += xorg;
++        dsty += yorg;
++
++        nd = FirstBankOf(dstx,     dsty);
++        nde = LastBankOf(dstx + w, dsty + h);
++        for (;  nd <= nde;  nd++)
++        {
++            if (!(pGC->pCompositeClip = pGCPriv->pBankedClips[nd]))
++                continue;
++
++            /*
++             * It's faster to let the lower-level CopyArea do the clipping
++             * within each bank.
++             */
++            nBox = REGION_NUM_RECTS(pScreenPriv->pBanks[nd]);
++            pBox = REGION_RECTS(pScreenPriv->pBanks[nd]);
++
++            for (;  nBox--;  pBox++)
++            {
++                cx1 = max(pBox->x1, dstx);
++                cy1 = max(pBox->y1, dsty);
++                cx2 = min(pBox->x2, dstx + w);
++                cy2 = min(pBox->y2, dsty + h);
++
++                if ((cx1 >= cx2) || (cy1 >= cy2))
++                    continue;
++
++                GCOP_UNWRAP;
++
++                SET_SINGLE_BANK(pScreenPriv->pScreenPixmap, -1, -1, nd);
++
++                if (SinglePlane)
++                    (*pGC->ops->CopyPlane)(pSrc, pDst, pGC,
++                        cx1 + dx - xorg, cy1 + dy - yorg,
++                        cx2 - cx1, cy2 - cy1,
++                        cx1 - xorg, cy1 - yorg, plane);
++                else
++                    (*pGC->ops->CopyArea)(pSrc, pDst, pGC,
++                        cx1 + dx - xorg, cy1 + dy - yorg,
++                        cx2 - cx1, cy2 - cy1,
++                        cx1 - xorg, cy1 - yorg);
++
++                GCOP_WRAP;
++            }
++        }
++
++        CLIP_RESTORE;
++    }
++    else /* IS_BANKED(pSrc) && IS_BANKED(pDst) */
++    {
++        CLIP_SAVE;
++
++        fExpose = pGC->fExpose;
++
++        fastBox.x1 = srcx + pSrc->x;
++        fastBox.y1 = srcy + pSrc->y;
++        fastBox.x2 = fastBox.x1 + w;
++        fastBox.y2 = fastBox.y1 + h;
++
++        dx = dstx - fastBox.x1;
++        dy = dsty - fastBox.y1;
++        if (pGC->miTranslate)
++        {
++            xorg = pDst->x;
++            yorg = pDst->y;
++        }
++
++        /*
++         * Clip against the source.  Otherwise we will blit too much for SINGLE
++         * and SHARED banked systems.
++         */
++        freeSrcClip = FALSE;
++        fastClip    = FALSE;
++        fastExpose  = FALSE;
++
++        if (pGC->subWindowMode != IncludeInferiors)
++            prgnSrcClip = &((WindowPtr)pSrc)->clipList;
++        else if (!((WindowPtr)pSrc)->parent)
++            fastClip = TRUE;
++        else if (pSrc == pDst)
++            prgnSrcClip = pGC->pCompositeClip;
++        else
++        {
++            prgnSrcClip = NotClippedByChildren((WindowPtr)pSrc);
++            freeSrcClip = TRUE;
++        }
++
++        if (fastClip)
++        {
++            fastExpose = TRUE;
++
++            /*
++             * Clip the source.  If regions extend beyond the source size, make
++             * sure exposure events get sent.
++             */
++            if (fastBox.x1 < pSrc->x)
++            {
++                fastBox.x1 = pSrc->x;
++                fastExpose = FALSE;
++            }
++            if (fastBox.y1 < pSrc->y)
++            {
++                fastBox.y1 = pSrc->y;
++                fastExpose = FALSE;
++            }
++            if (fastBox.x2 > pSrc->x + (int) pSrc->width)
++            {
++                fastBox.x2 = pSrc->x + (int) pSrc->width;
++                fastExpose = FALSE;
++            }
++            if (fastBox.y2 > pSrc->y + (int) pSrc->height)
++            {
++                fastBox.y2 = pSrc->y + (int) pSrc->height;
++                fastExpose = FALSE;
++            }
++
++            nBox = 1;
++            pBox = &fastBox;
++        }
++        else
++        {
++            REGION_INIT(pScreen, &rgnDst, &fastBox, 1);
++            REGION_INTERSECT(pScreen, &rgnDst, &rgnDst, prgnSrcClip);
++            pBox = REGION_RECTS(&rgnDst);
++            nBox = REGION_NUM_RECTS(&rgnDst);
++        }
++
++        /*
++         * fastBlit can only be TRUE if we don't need to worry about attempts
++         * to read partial pixels through the destination bank.
++         */
++        if (SinglePlane)
++            fastBlit = pGCPriv->fastPlane;
++        else
++            fastBlit = pGCPriv->fastCopy;
++
++        nQueue = nBox * pScreenPriv->maxRects * 2;
++        pQueue = Queue = xalloc_ARRAY(miBankQueue, nQueue);
++
++        if (Queue)
++        {
++            for (;  nBox--;  pBox++)
++            {
++                ns = FirstBankOf(pBox->x1, pBox->y1);
++                nse = LastBankOf(pBox->x2, pBox->y2);
++                for (;  ns <= nse;  ns++)
++                {
++                    if (!pScreenPriv->pBanks[ns])
++                        continue;
++
++                    nBoxClipSrc = REGION_NUM_RECTS(pScreenPriv->pBanks[ns]);
++                    pBoxClipSrc = REGION_RECTS(pScreenPriv->pBanks[ns]);
++
++                    for (;  nBoxClipSrc--;  pBoxClipSrc++)
++                    {
++                        cx1 = max(pBox->x1, pBoxClipSrc->x1);
++                        cy1 = max(pBox->y1, pBoxClipSrc->y1);
++                        cx2 = min(pBox->x2, pBoxClipSrc->x2);
++                        cy2 = min(pBox->y2, pBoxClipSrc->y2);
++
++                        /* Check to see if the region is empty */
++                        if ((cx1 >= cx2) || (cy1 >= cy2))
++                            continue;
++
++                        /* Translate c[xy]* to destination coordinates */
++                        cx1 += dx + xorg;
++                        cy1 += dy + yorg;
++                        cx2 += dx + xorg;
++                        cy2 += dy + yorg;
++
++                        nd = FirstBankOf(cx1, cy1);
++                        nde = LastBankOf(cx2, cy2);
++                        for (;  nd <= nde;  nd++)
++                        {
++                            if (!pGCPriv->pBankedClips[nd])
++                                continue;
++
++                            /*
++                             * Clients can send quite large clip descriptions,
++                             * so use the bank clips here instead.
++                             */
++                            nBoxClipDst =
++                                REGION_NUM_RECTS(pScreenPriv->pBanks[nd]);
++                            pBoxClipDst =
++                                REGION_RECTS(pScreenPriv->pBanks[nd]);
++
++                            for (;  nBoxClipDst--;  pBoxClipDst++)
++                            {
++                                ccBox.x1 = max(cx1, pBoxClipDst->x1);
++                                ccBox.y1 = max(cy1, pBoxClipDst->y1);
++                                ccBox.x2 = min(cx2, pBoxClipDst->x2);
++                                ccBox.y2 = min(cy2, pBoxClipDst->y2);
++
++                                /* Check to see if the region is empty */
++                                if ((ccBox.x1 >= ccBox.x2) ||
++                                    (ccBox.y1 >= ccBox.y2))
++                                    continue;
++
++                                pQueue->srcBankNo = ns;
++                                pQueue->dstBankNo = nd;
++                                pQueue->x         = ccBox.x1 - xorg;
++                                pQueue->y         = ccBox.y1 - yorg;
++                                pQueue->w         = ccBox.x2 - ccBox.x1;
++                                pQueue->h         = ccBox.y2 - ccBox.y1;
++
++                                if (maxWidth < pQueue->w)
++                                    maxWidth = pQueue->w;
++                                if (maxHeight < pQueue->h)
++                                    maxHeight = pQueue->h;
++
++                                /*
++                                 * When shared banking is used and the source
++                                 * and destination banks differ, prevent
++                                 * attempts to fetch partial scanline pad units
++                                 * through the destination bank.
++                                 */
++                                pQueue->fastBlit = fastBlit;
++                                if (fastBlit &&
++                                    (pScreenPriv->type == BANK_SHARED) &&
++                                    (ns != nd) &&
++                                    ((ccBox.x1 %
++                                      pScreenPriv->nPixelsPerScanlinePadUnit) ||
++                                     (ccBox.x2 %
++                                      pScreenPriv->nPixelsPerScanlinePadUnit) ||
++                                     (RECT_IN_REGION(pScreen,
++                                       pGCPriv->pBankedClips[nd], &ccBox) !=
++                                      rgnIN)))
++                                    pQueue->fastBlit = FALSE;
++                                pQueue++;
++                            }
++                        }
++                    }
++                }
++            }
++        }
++
++        if (!fastClip)
++        {
++            REGION_UNINIT(pScreen, &rgnDst);
++            if (freeSrcClip)
++                REGION_DESTROY(pScreen, prgnSrcClip);
++        }
++
++        pQueueNew = pQueue;
++        nQueue = pQueue - Queue;
++
++        if (nQueue > 0)
++        {
++            BANK_SAVE;
++
++            pQueue = Queue;
++
++            if ((nQueue > 1) &&
++                ((pSrc == pDst) || (pGC->subWindowMode == IncludeInferiors)))
++            {
++                if ((srcy + pSrc->y) < (dsty + yorg))
++                {
++                    /* Sort from bottom to top */
++                    pQueueBase = pQueueNext = pQueue + nQueue - 1;
++
++                    while (pQueueBase >= pQueue)
++                    {
++                        while ((pQueueNext >= pQueue) &&
++                               (pQueueBase->y == pQueueNext->y))
++                            pQueueNext--;
++
++                        pQueueTmp = pQueueNext + 1;
++                        while (pQueueTmp <= pQueueBase)
++                            *pQueueNew++ = *pQueueTmp++;
++
++                        pQueueBase = pQueueNext;
++                    }
++
++                    pQueueNew -= nQueue;
++                    pQueue = pQueueNew;
++                    pQueueNew = Queue;
++                }
++
++                if ((srcx + pSrc->x) < (dstx + xorg))
++                {
++                    /* Sort from right to left */
++                    pQueueBase = pQueueNext = pQueue;
++
++                    while (pQueueBase < pQueue + nQueue)
++                    {
++                        while ((pQueueNext < pQueue + nQueue) &&
++                               (pQueueNext->y == pQueueBase->y))
++                            pQueueNext++;
++
++                        pQueueTmp = pQueueNext;
++                        while (pQueueTmp != pQueueBase)
++                            *pQueueNew++ = *--pQueueTmp;
++
++                        pQueueBase = pQueueNext;
++                    }
++
++                    pQueueNew -= nQueue;
++                    pQueue = pQueueNew;
++                }
++            }
++
++            paddedWidth = PixmapBytePad(maxWidth,
++                pScreenPriv->pScreenPixmap->drawable.depth);
++            pImage = xnfcalloc(paddedWidth, maxHeight);
++
++            pGC->fExpose = FALSE;
++
++            while (nQueue--)
++            {
++                pGC->pCompositeClip = pGCPriv->pBankedClips[pQueue->dstBankNo];
++
++                GCOP_UNWRAP;
++
++                if (pQueue->srcBankNo == pQueue->dstBankNo)
++                {
++                    SET_SINGLE_BANK(pScreenPriv->pScreenPixmap,
++                        -1, -1, pQueue->srcBankNo);
++
++                    if (SinglePlane)
++                        (*pGC->ops->CopyPlane)(pSrc, pDst, pGC,
++                            pQueue->x - dx - pSrc->x, pQueue->y - dy - pSrc->y,
++                            pQueue->w, pQueue->h, pQueue->x, pQueue->y, plane);
++                    else
++                        (*pGC->ops->CopyArea)(pSrc, pDst, pGC,
++                            pQueue->x - dx - pSrc->x, pQueue->y - dy - pSrc->y,
++                            pQueue->w, pQueue->h, pQueue->x, pQueue->y);
++                }
++                else if (pQueue->fastBlit)
++                {
++                    SET_SOURCE_BANK     (pScreenPriv->pBankPixmap,
++                        pScreenPriv->pScreenPixmap->drawable.width,
++                        pScreenPriv->pScreenPixmap->devKind,
++                        pQueue->srcBankNo);
++                    SET_DESTINATION_BANK(pScreenPriv->pScreenPixmap,
++                        -1, -1, pQueue->dstBankNo);
++
++                    if (SinglePlane)
++                        (*pGC->ops->CopyPlane)(
++                            (DrawablePtr)pScreenPriv->pBankPixmap, pDst, pGC,
++                            pQueue->x - dx, pQueue->y - dy,
++                            pQueue->w, pQueue->h, pQueue->x, pQueue->y, plane);
++                    else
++                        (*pGC->ops->CopyArea)(
++                            (DrawablePtr)pScreenPriv->pBankPixmap, pDst, pGC,
++                            pQueue->x - dx, pQueue->y - dy,
++                            pQueue->w, pQueue->h, pQueue->x, pQueue->y);
++                }
++                else if (pImage)
++                {
++                    ModifyPixmap(pScreenPriv->pBankPixmap,
++                        maxWidth, paddedWidth, pImage);
++
++                    SET_SINGLE_BANK(pScreenPriv->pScreenPixmap,
++                        -1, -1, pQueue->srcBankNo);
++
++                    (*pScreenPriv->pBankGC->ops->CopyArea)(
++                        pSrc, (DrawablePtr)pScreenPriv->pBankPixmap,
++                        pScreenPriv->pBankGC,
++                        pQueue->x - dx - pSrc->x, pQueue->y - dy - pSrc->y,
++                        pQueue->w, pQueue->h, 0, 0);
++
++                    SET_SINGLE_BANK(pScreenPriv->pScreenPixmap,
++                        -1, -1, pQueue->dstBankNo);
++
++                    if (SinglePlane)
++                        (*pGC->ops->CopyPlane)(
++                            (DrawablePtr)pScreenPriv->pBankPixmap,
++                            pDst, pGC, 0, 0, pQueue->w, pQueue->h,
++                            pQueue->x, pQueue->y, plane);
++                    else
++                        (*pGC->ops->CopyArea)(
++                            (DrawablePtr)pScreenPriv->pBankPixmap,
++                            pDst, pGC, 0, 0, pQueue->w, pQueue->h,
++                            pQueue->x, pQueue->y);
++                }
++
++                GCOP_WRAP;
++
++                pQueue++;
++            }
++
++            free(pImage);
++
++            BANK_RESTORE;
++        }
++
++        CLIP_RESTORE;
++
++        pGC->fExpose = fExpose;
++
++        free(Queue);
++    }
++
++    SCREEN_RESTORE;
++
++    if (!fExpose || fastExpose)
++        return ret;
++
++    return miHandleExposures(pSrc, pDst, pGC, srcx, srcy, w, h, dstx, dsty);
++}
++
++static RegionPtr
++miBankCopyArea(
++    DrawablePtr pSrc,
++    DrawablePtr pDst,
++    GCPtr       pGC,
++    int         srcx,
++    int         srcy,
++    int         w,
++    int         h,
++    int         dstx,
++    int         dsty
++)
++{
++    return miBankCopy(pSrc, pDst, pGC, srcx, srcy, w, h, dstx, dsty, 0, FALSE);
++}
++
++static RegionPtr
++miBankCopyPlane(
++    DrawablePtr   pSrc,
++    DrawablePtr   pDst,
++    GCPtr         pGC,
++    int           srcx,
++    int           srcy,
++    int           w,
++    int           h,
++    int           dstx,
++    int           dsty,
++    unsigned long plane
++)
++{
++    return
++        miBankCopy(pSrc, pDst, pGC, srcx, srcy, w, h, dstx, dsty, plane, TRUE);
++}
++
++static void
++miBankPolyPoint(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         mode,
++    int         nArray,
++    xPoint      *pArray
++)
++{
++#   define GCOP_ARGS GCOP_0D_ARGS
++    GCOP_COMPLEX(PolyPoint, xPoint);
++#   undef GCOP_ARGS
++}
++
++static void
++miBankPolylines(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         mode,
++    int         nArray,
++    DDXPointPtr pArray
++)
++{
++#   define GCOP_ARGS GCOP_0D_ARGS
++    GCOP_COMPLEX(Polylines, DDXPointRec);
++#   undef GCOP_ARGS
++}
++
++static void
++miBankPolySegment(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         nArray,
++    xSegment    *pArray
++)
++{
++#   define GCOP_ARGS GCOP_1D_ARGS
++    GCOP_COMPLEX(PolySegment, xSegment);
++#   undef GCOP_ARGS
++}
++
++static void
++miBankPolyRectangle(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         nArray,
++    xRectangle  *pArray
++)
++{
++#   define GCOP_ARGS GCOP_1D_ARGS
++    GCOP_COMPLEX(PolyRectangle, xRectangle);
++#   undef GCOP_ARGS
++}
++
++static void
++miBankPolyArc(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         nArray,
++    xArc        *pArray
++)
++{
++#   define GCOP_ARGS GCOP_1D_ARGS
++    GCOP_COMPLEX(PolyArc, xArc);
++#   undef GCOP_ARGS
++}
++
++static void
++miBankFillPolygon(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         shape,
++    int         mode,
++    int         nArray,
++    DDXPointRec *pArray
++)
++{
++#   define GCOP_ARGS GCOP_2D_ARGS
++    GCOP_COMPLEX(FillPolygon, DDXPointRec);
++#   undef GCOP_ARGS
++}
++
++static void
++miBankPolyFillRect(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         nArray,
++    xRectangle  *pArray
++)
++{
++#   define GCOP_ARGS GCOP_1D_ARGS
++    GCOP_COMPLEX(PolyFillRect, xRectangle);
++#   undef GCOP_ARGS
++}
++
++static void
++miBankPolyFillArc(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         nArray,
++    xArc        *pArray
++)
++{
++#   define GCOP_ARGS GCOP_1D_ARGS
++    GCOP_COMPLEX(PolyFillArc, xArc);
++#   undef GCOP_ARGS
++}
++
++static int
++miBankPolyText8(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         x,
++    int         y,
++    int         nArray,
++    char        *pchar
++)
++{
++    int retval = x;
++
++    GCOP_SIMPLE(retval =
++        (*pGC->ops->PolyText8)(pDrawable, pGC, x, y, nArray, pchar));
++
++    return retval;
++}
++
++static int
++miBankPolyText16(
++    DrawablePtr    pDrawable,
++    GCPtr          pGC,
++    int            x,
++    int            y,
++    int            nArray,
++    unsigned short *pchar
++)
++{
++    int retval = x;
++
++    GCOP_SIMPLE(retval =
++        (*pGC->ops->PolyText16)(pDrawable, pGC, x, y, nArray, pchar));
++
++    return retval;
++}
++
++static void
++miBankImageText8(
++    DrawablePtr pDrawable,
++    GCPtr       pGC,
++    int         x,
++    int         y,
++    int         nArray,
++    char        *pchar
++)
++{
++    GCOP_SIMPLE((*pGC->ops->ImageText8)(pDrawable, pGC, x, y, nArray, pchar));
++}
++
++static void
++miBankImageText16(
++    DrawablePtr    pDrawable,
++    GCPtr          pGC,
++    int            x,
++    int            y,
++    int            nArray,
++    unsigned short *pchar
++)
++{
++    GCOP_SIMPLE((*pGC->ops->ImageText16)(pDrawable, pGC, x, y, nArray, pchar));
++}
++
++static void
++miBankImageGlyphBlt(
++    DrawablePtr  pDrawable,
++    GCPtr        pGC,
++    int          x,
++    int          y,
++    unsigned int nArray,
++    CharInfoPtr  *ppci,
++    void         *pglyphBase
++)
++{
++    GCOP_SIMPLE((*pGC->ops->ImageGlyphBlt)(pDrawable, pGC,
++        x, y, nArray, ppci, pglyphBase));
++}
++
++static void
++miBankPolyGlyphBlt(
++    DrawablePtr  pDrawable,
++    GCPtr        pGC,
++    int          x,
++    int          y,
++    unsigned int nArray,
++    CharInfoPtr  *ppci,
++    void         *pglyphBase
++)
++{
++    GCOP_SIMPLE((*pGC->ops->PolyGlyphBlt)(pDrawable, pGC,
++        x, y, nArray, ppci, pglyphBase));
++}
++
++static void
++miBankPushPixels(
++    GCPtr       pGC,
++    PixmapPtr   pBitmap,
++    DrawablePtr pDrawable,
++    int         w,
++    int         h,
++    int         x,
++    int         y
++)
++{
++    if ((w > 0) && (h > 0))
++    {
++        GCOP_INIT;
++        SCREEN_SAVE;
++
++        if (!IS_BANKED(pDrawable))
++        {
++            GCOP_UNWRAP;
++
++            (*pGC->ops->PushPixels)(pGC, pBitmap, pDrawable, w, h, x, y);
++
++            GCOP_WRAP;
++        }
++        else
++        {
++            int i, j;
++
++            CLIP_SAVE;
++
++            i = FirstBankOf(x,     y);
++            j =  LastBankOf(x + w, y + h);
++            for (;  i <= j;  i++)
++            {
++                if (!(pGC->pCompositeClip = pGCPriv->pBankedClips[i]))
++                    continue;
++
++                GCOP_UNWRAP;
++
++                SET_SINGLE_BANK(pScreenPriv->pScreenPixmap, -1, -1, i);
++
++                (*pGC->ops->PushPixels)(pGC, pBitmap, pDrawable, w, h, x, y);
++
++                GCOP_WRAP;
++            }
++
++            CLIP_RESTORE;
++        }
++
++        SCREEN_RESTORE;
++    }
++}
++
++static GCOps miBankGCOps =
++{
++    miBankFillSpans,
++    miBankSetSpans,
++    miBankPutImage,
++    miBankCopyArea,
++    miBankCopyPlane,
++    miBankPolyPoint,
++    miBankPolylines,
++    miBankPolySegment,
++    miBankPolyRectangle,
++    miBankPolyArc,
++    miBankFillPolygon,
++    miBankPolyFillRect,
++    miBankPolyFillArc,
++    miBankPolyText8,
++    miBankPolyText16,
++    miBankImageText8,
++    miBankImageText16,
++    miBankImageGlyphBlt,
++    miBankPolyGlyphBlt,
++    miBankPushPixels,
++};
++
++/********************
++ * GCFuncs wrappers *
++ ********************/
++
++static void
++miBankValidateGC(
++    GCPtr         pGC,
++    unsigned long changes,
++    DrawablePtr   pDrawable
++)
++{
++    GC_INIT(pGC);
++    GC_UNWRAP(pGC);
++
++    (*pGC->funcs->ValidateGC)(pGC, changes, pDrawable);
++
++    if ((changes & (GCClipXOrigin|GCClipYOrigin|GCClipMask|GCSubwindowMode)) ||
++        (pDrawable->serialNumber != (pGC->serialNumber & DRAWABLE_SERIAL_BITS)))
++    {
++        ScreenPtr     pScreen = pGC->pScreen;
++        RegionPtr     prgnClip;
++        unsigned long planemask;
++        int           i;
++
++        SCREEN_INIT;
++        SCREEN_SAVE;
++
++        if (IS_BANKED(pDrawable))
++        {
++            for (i = 0;  i < pScreenPriv->nBanks;  i++)
++            {
++                if (!pScreenPriv->pBanks[i])
++                    continue;
++
++                if (!(prgnClip = pGCPriv->pBankedClips[i]))
++                    prgnClip = REGION_CREATE(pScreen, NULL, 1);
++
++                REGION_INTERSECT(pScreen, prgnClip,
++                    pScreenPriv->pBanks[i], pGC->pCompositeClip);
++
++                if ((REGION_NUM_RECTS(prgnClip) <= 1) &&
++                    ((prgnClip->extents.x1 == prgnClip->extents.x2) ||
++                     (prgnClip->extents.y1 == prgnClip->extents.y2)))
++                {
++                    REGION_DESTROY(pScreen, prgnClip);
++                    pGCPriv->pBankedClips[i] = NULL;
++                }
++                else
++                    pGCPriv->pBankedClips[i] = prgnClip;
++            }
++
++            /*
++             * fastCopy and fastPlane can only be TRUE if we don't need to
++             * worry about attempts to read partial pixels through the
++             * destination bank.
++             */
++            switch (pScreenPriv->type)
++            {
++                case BANK_SHARED:
++                    pGCPriv->fastCopy = pGCPriv->fastPlane = FALSE;
++
++                    if ((pGC->alu != GXclear) && (pGC->alu != GXcopy) &&
++                        (pGC->alu != GXcopyInverted) && (pGC->alu != GXset))
++                        break;
++
++                    if (pScreen->rootDepth == 1)
++                        pGCPriv->fastPlane = TRUE;
++
++                    /* This is probably paranoia */
++                    if ((pDrawable->depth != pScreen->rootDepth) ||
++                        (pDrawable->depth != pGC->depth))
++                        break;
++
++                    planemask = (1 << pGC->depth) - 1;
++                    if ((pGC->planemask & planemask) == planemask)
++                        pGCPriv->fastCopy = TRUE;
++
++                    break;
++
++                case BANK_DOUBLE:
++                    pGCPriv->fastCopy = pGCPriv->fastPlane = TRUE;
++                    break;
++
++                default:
++                    pGCPriv->fastCopy = pGCPriv->fastPlane = FALSE;
++                    break;
++            }
++        }
++        else
++        {
++            /*
++             * Here we are on a pixmap and don't need all that special clipping
++             * stuff, hence free it.
++             */
++            for (i = 0;  i < pScreenPriv->nBanks;  i++)
++            {
++                if (!pGCPriv->pBankedClips[i])
++                    continue;
++
++                REGION_DESTROY(pScreen, pGCPriv->pBankedClips[i]);
++                pGCPriv->pBankedClips[i] = NULL;
++            }
++        }
++
++        SCREEN_RESTORE;
++    }
++
++    GC_WRAP(pGC);
++}
++
++static void
++miBankChangeGC(
++    GCPtr         pGC,
++    unsigned long mask
++)
++{
++    GC_INIT(pGC);
++    GC_UNWRAP(pGC);
++
++    (*pGC->funcs->ChangeGC)(pGC, mask);
++
++    GC_WRAP(pGC);
++}
++
++static void
++miBankCopyGC(
++    GCPtr         pGCSrc,
++    unsigned long mask,
++    GCPtr         pGCDst
++)
++{
++    GC_INIT(pGCDst);
++    GC_UNWRAP(pGCDst);
++
++    (*pGCDst->funcs->CopyGC)(pGCSrc, mask, pGCDst);
++
++    GC_WRAP(pGCDst);
++}
++
++static void
++miBankDestroyGC(
++    GCPtr pGC
++)
++{
++    ScreenPtr pScreen = pGC->pScreen;
++    int       i;
++
++    SCREEN_INIT;
++    GC_INIT(pGC);
++    GC_UNWRAP(pGC);
++
++    (*pGC->funcs->DestroyGC)(pGC);
++
++    for (i = 0;  i < pScreenPriv->nBanks;  i++)
++    {
++        if (!pGCPriv->pBankedClips[i])
++            continue;
++
++        REGION_DESTROY(pScreen, pGCPriv->pBankedClips[i]);
++        pGCPriv->pBankedClips[i] = NULL;
++    }
++
++    GC_WRAP(pGC);
++}
++
++static void
++miBankChangeClip(
++    GCPtr   pGC,
++    int     type,
++    void    *pvalue,
++    int     nrects
++)
++{
++    GC_INIT(pGC);
++    GC_UNWRAP(pGC);
++
++    (*pGC->funcs->ChangeClip)(pGC, type, pvalue, nrects);
++
++    GC_WRAP(pGC);
++}
++
++static void
++miBankDestroyClip(
++    GCPtr pGC
++)
++{
++    GC_INIT(pGC);
++    GC_UNWRAP(pGC);
++
++    (*pGC->funcs->DestroyClip)(pGC);
++
++    GC_WRAP(pGC);
++}
++
++static void
++miBankCopyClip(
++    GCPtr pGCDst,
++    GCPtr pGCSrc
++)
++{
++    GC_INIT(pGCDst);
++    GC_UNWRAP(pGCDst);
++
++    (*pGCDst->funcs->CopyClip)(pGCDst, pGCSrc);
++
++    GC_WRAP(pGCDst);
++}
++
++static GCFuncs miBankGCFuncs =
++{
++    miBankValidateGC,
++    miBankChangeGC,
++    miBankCopyGC,
++    miBankDestroyGC,
++    miBankChangeClip,
++    miBankDestroyClip,
++    miBankCopyClip
++};
++
++/*******************
++ * Screen Wrappers *
++ *******************/
++
++static Bool
++miBankCreateScreenResources(
++    ScreenPtr pScreen
++)
++{
++    Bool retval;
++
++    SCREEN_INIT;
++    SCREEN_UNWRAP(CreateScreenResources);
++
++    if ((retval = (*pScreen->CreateScreenResources)(pScreen)))
++    {
++        /* Set screen buffer address to something recognizable */
++        pScreenPriv->pScreenPixmap = (*pScreen->GetScreenPixmap)(pScreen);
++        pScreenPriv->pbits = pScreenPriv->pScreenPixmap->devPrivate.ptr;
++        pScreenPriv->pScreenPixmap->devPrivate.ptr = (void *)pScreenPriv;
++
++        /* Get shadow pixmap;  width & height of 0 means no pixmap data */
++        pScreenPriv->pBankPixmap = (*pScreen->CreatePixmap)(pScreen, 0, 0,
++            pScreenPriv->pScreenPixmap->drawable.depth, 0);
++        if (!pScreenPriv->pBankPixmap)
++            retval = FALSE;
++    }
++
++    /* Shadow the screen */
++    if (retval)
++        retval = (*pScreen->ModifyPixmapHeader)(pScreenPriv->pBankPixmap,
++            pScreenPriv->pScreenPixmap->drawable.width,
++            pScreenPriv->pScreenPixmap->drawable.height,
++            pScreenPriv->pScreenPixmap->drawable.depth,
++            pScreenPriv->pScreenPixmap->drawable.bitsPerPixel,
++            pScreenPriv->pScreenPixmap->devKind, NULL);
++
++    /* Create shadow GC */
++    if (retval)
++    {
++        pScreenPriv->pBankGC = CreateScratchGC(pScreen,
++            pScreenPriv->pBankPixmap->drawable.depth);
++        if (!pScreenPriv->pBankGC)
++            retval = FALSE;
++    }
++
++    /* Validate shadow GC */
++    if (retval)
++    {
++        pScreenPriv->pBankGC->graphicsExposures = FALSE;
++        pScreenPriv->pBankGC->subWindowMode = IncludeInferiors;
++        ValidateGC((DrawablePtr)pScreenPriv->pBankPixmap,
++            pScreenPriv->pBankGC);
++    }
++
++    SCREEN_WRAP(CreateScreenResources, miBankCreateScreenResources);
++
++    return retval;
++}
++
++static Bool
++miBankModifyPixmapHeader(
++    PixmapPtr pPixmap,
++    int       width,
++    int       height,
++    int       depth,
++    int       bitsPerPixel,
++    int       devKind,
++    void      *pPixData
++)
++{
++    Bool retval = FALSE;
++
++    if (pPixmap)
++    {
++        ScreenPtr pScreen = pPixmap->drawable.pScreen;
++
++        SCREEN_INIT;
++        PIXMAP_SAVE(pPixmap);
++        SCREEN_UNWRAP(ModifyPixmapHeader);
++
++        retval = (*pScreen->ModifyPixmapHeader)(pPixmap, width, height,
++            depth, bitsPerPixel, devKind, pPixData);
++
++        SCREEN_WRAP(ModifyPixmapHeader, miBankModifyPixmapHeader);
++
++        if (pbits == (void *)pScreenPriv)
++        {
++            pScreenPriv->pbits = pPixmap->devPrivate.ptr;
++            pPixmap->devPrivate.ptr = pbits;
++        }
++    }
++
++    return retval;
++}
++
++static Bool
++miBankCloseScreen(
++    int       nIndex,
++    ScreenPtr pScreen
++)
++{
++    int i;
++
++    SCREEN_INIT;
++
++    /* Free shadow GC */
++    FreeScratchGC(pScreenPriv->pBankGC);
++
++    /* Free shadow pixmap */
++    (*pScreen->DestroyPixmap)(pScreenPriv->pBankPixmap);
++
++    /* Restore screen pixmap devPrivate pointer */
++    pScreenPriv->pScreenPixmap->devPrivate.ptr = pScreenPriv->pbits;
++
++    /* Delete bank clips */
++    for (i = 0;  i < pScreenPriv->nBanks;  i++)
++        if (pScreenPriv->pBanks[i])
++            REGION_DESTROY(pScreen, pScreenPriv->pBanks[i]);
++
++    free(pScreenPriv->pBanks);
++
++    SCREEN_UNWRAP(CreateScreenResources);
++    SCREEN_UNWRAP(ModifyPixmapHeader);
++    SCREEN_UNWRAP(CloseScreen);
++    SCREEN_UNWRAP(GetImage);
++    SCREEN_UNWRAP(GetSpans);
++    SCREEN_UNWRAP(CreateGC);
++    SCREEN_UNWRAP(CopyWindow);
++
++    free(pScreenPriv);
++    return (*pScreen->CloseScreen)(pScreen);
++}
++
++static void
++miBankGetImage(
++    DrawablePtr   pDrawable,
++    int           sx,
++    int           sy,
++    int           w,
++    int           h,
++    unsigned int  format,
++    unsigned long planemask,
++    char          *pImage
++)
++{
++    if ((w > 0) && (h > 0))
++    {
++        ScreenPtr pScreen = pDrawable->pScreen;
++
++        SCREEN_INIT;
++        SCREEN_STATUS;
++        SCREEN_UNWRAP(GetImage);
++
++        if (!IS_BANKED(pDrawable))
++        {
++            (*pScreen->GetImage)(pDrawable, sx, sy, w, h,
++                format, planemask, pImage);
++        }
++        else
++        {
++            int  paddedWidth;
++            char *pBankImage;
++
++            paddedWidth = PixmapBytePad(w,
++                pScreenPriv->pScreenPixmap->drawable.depth);
++            pBankImage = xnfcalloc(paddedWidth, h);
++
++            if (pBankImage)
++            {
++                BANK_SAVE;
++
++                ModifyPixmap(pScreenPriv->pBankPixmap, w, paddedWidth,
++                    pBankImage);
++
++                (*pScreenPriv->pBankGC->ops->CopyArea)(
++                    &pScreen->root->drawable,
++                    (DrawablePtr)pScreenPriv->pBankPixmap,
++                    pScreenPriv->pBankGC,
++                    sx + pDrawable->x, sy + pDrawable->y, w, h, 0, 0);
++
++                (*pScreen->GetImage)((DrawablePtr)pScreenPriv->pBankPixmap,
++                    0, 0, w, h, format, planemask, pImage);
++
++                BANK_RESTORE;
++
++                free(pBankImage);
++            }
++        }
++
++        SCREEN_WRAP(GetImage, miBankGetImage);
++    }
++}
++
++static void
++miBankGetSpans(
++    DrawablePtr pDrawable,
++    int         wMax,
++    DDXPointPtr ppt,
++    int         *pwidth,
++    int         nspans,
++    char        *pImage
++)
++{
++    if (nspans > 0)
++    {
++        ScreenPtr pScreen = pDrawable->pScreen;
++
++        SCREEN_INIT;
++        SCREEN_STATUS;
++        SCREEN_UNWRAP(GetSpans);
++
++        if (!IS_BANKED(pDrawable))
++        {
++            (*pScreen->GetSpans)(pDrawable, wMax, ppt, pwidth, nspans, pImage);
++        }
++        else
++        {
++            char        *pBankImage;
++            int         paddedWidth;
++            DDXPointRec pt;
++
++            pt.x = pt.y = 0;
++
++            paddedWidth =
++                PixmapBytePad(pScreenPriv->pScreenPixmap->drawable.width,
++                    pScreenPriv->pScreenPixmap->drawable.depth);
++            pBankImage = xnfcalloc(1, paddedWidth);
++
++            if (pBankImage)
++            {
++                BANK_SAVE;
++
++                ModifyPixmap(pScreenPriv->pBankPixmap,
++                    pScreenPriv->pScreenPixmap->drawable.width,
++                    paddedWidth, pBankImage);
++
++                for (;  nspans--;  ppt++, pwidth++)
++                {
++                    if (*pwidth <= 0)
++                        continue;
++
++                    (*pScreenPriv->pBankGC->ops->CopyArea)(
++                        &pScreen->root->drawable,
++                        (DrawablePtr)pScreenPriv->pBankPixmap,
++                        pScreenPriv->pBankGC,
++                        ppt->x, ppt->y, *pwidth, 1, 0, 0);
++
++                    (*pScreen->GetSpans)((DrawablePtr)pScreenPriv->pBankPixmap,
++                        wMax, &pt, pwidth, 1, pImage);
++
++                    pImage = pImage + PixmapBytePad(*pwidth, pDrawable->depth);
++                }
++
++                BANK_RESTORE;
++
++                free(pBankImage);
++            }
++        }
++
++        SCREEN_WRAP(GetSpans, miBankGetSpans);
++    }
++}
++
++static Bool
++miBankCreateGC(
++    GCPtr pGC
++)
++{
++    ScreenPtr   pScreen = pGC->pScreen;
++    miBankGCPtr pGCPriv = BANK_GCPRIVATE(pGC);
++    Bool        ret;
++
++    SCREEN_INIT;
++    SCREEN_UNWRAP(CreateGC);
++
++    if ((ret = (*pScreen->CreateGC)(pGC)))
++    {
++        pGCPriv->unwrappedOps = &miBankGCOps;
++        pGCPriv->unwrappedFuncs = &miBankGCFuncs;
++        GC_WRAP(pGC);
++
++        memset(&pGCPriv->pBankedClips, 0,
++            pScreenPriv->nBanks * sizeof(pGCPriv->pBankedClips));
++    }
++
++    SCREEN_WRAP(CreateGC, miBankCreateGC);
++
++    return ret;
++}
++
++static void
++miBankCopyWindow(
++    WindowPtr   pWindow,
++    DDXPointRec ptOldOrg,
++    RegionPtr   pRgnSrc
++)
++{
++    ScreenPtr   pScreen = pWindow->drawable.pScreen;
++    GCPtr       pGC;
++    int         dx, dy, nBox;
++    DrawablePtr pDrawable = &pScreen->root->drawable;
++    RegionPtr   pRgnDst;
++    BoxPtr      pBox, pBoxTmp, pBoxNext, pBoxBase, pBoxNew1, pBoxNew2;
++    XID         subWindowMode = IncludeInferiors;
++
++    pGC = GetScratchGC(pDrawable->depth, pScreen);
++
++    ChangeGC(NullClient, pGC, GCSubwindowMode, &subWindowMode);
++    ValidateGC(pDrawable, pGC);
++
++    pRgnDst = REGION_CREATE(pScreen, NULL, 1);
++
++    dx = ptOldOrg.x - pWindow->drawable.x;
++    dy = ptOldOrg.y - pWindow->drawable.y;
++    REGION_TRANSLATE(pScreen, pRgnSrc, -dx, -dy);
++    REGION_INTERSECT(pScreen, pRgnDst, &pWindow->borderClip, pRgnSrc);
++
++    pBox = REGION_RECTS(pRgnDst);
++    nBox = REGION_NUM_RECTS(pRgnDst);
++
++    pBoxNew1 = NULL;
++    pBoxNew2 = NULL;
++
++    if (nBox > 1)
++    {
++        if (dy < 0)
++        {
++            /* Sort boxes from bottom to top */
++            pBoxNew1 = xalloc_ARRAY(BoxRec, nBox);
++
++            if (pBoxNew1)
++            {
++                pBoxBase = pBoxNext = pBox + nBox - 1;
++
++                while (pBoxBase >= pBox)
++                {
++                    while ((pBoxNext >= pBox) &&
++                           (pBoxBase->y1 == pBoxNext->y1))
++                        pBoxNext--;
++
++                    pBoxTmp = pBoxNext + 1;
++
++                    while (pBoxTmp <= pBoxBase)
++                        *pBoxNew1++ = *pBoxTmp++;
++
++                    pBoxBase = pBoxNext;
++                }
++
++                pBoxNew1 -= nBox;
++                pBox = pBoxNew1;
++            }
++        }
++
++        if (dx < 0)
++        {
++            /* Sort boxes from right to left */
++            pBoxNew2 = xalloc_ARRAY(BoxRec, nBox);
++
++            if (pBoxNew2)
++            {
++                pBoxBase = pBoxNext = pBox;
++
++                while (pBoxBase < pBox + nBox)
++                {
++                    while ((pBoxNext < pBox + nBox) &&
++                           (pBoxNext->y1 == pBoxBase->y1))
++                        pBoxNext++;
++
++                    pBoxTmp = pBoxNext;
++
++                    while (pBoxTmp != pBoxBase)
++                        *pBoxNew2++ = *--pBoxTmp;
++
++                    pBoxBase = pBoxNext;
++                }
++
++                pBoxNew2 -= nBox;
++                pBox = pBoxNew2;
++            }
++        }
++    }
++
++    while (nBox--)
++    {
++        (*pGC->ops->CopyArea)(pDrawable, pDrawable, pGC,
++            pBox->x1 + dx, pBox->y1 + dy,
++            pBox->x2 - pBox->x1, pBox->y2 - pBox->y1,
++            pBox->x1, pBox->y1);
++
++        pBox++;
++    }
++
++    FreeScratchGC(pGC);
++
++    REGION_DESTROY(pScreen, pRgnDst);
++
++    free(pBoxNew2);
++    free(pBoxNew1);
++}
++
++Bool
++miInitializeBanking(
++    ScreenPtr     pScreen,
++    unsigned int  xsize,
++    unsigned int  ysize,
++    unsigned int  width,
++    miBankInfoPtr pBankInfo
++)
++{
++    miBankScreenPtr pScreenPriv;
++    unsigned long   nBitsPerBank, nBitsPerScanline, nPixelsPerScanlinePadUnit;
++    unsigned long   BankBase, ServerPad;
++    unsigned int    type, iBank, nBanks, maxRects, we, nBankBPP;
++    int             i;
++
++    if (!pBankInfo || !pBankInfo->BankSize)
++        return TRUE;            /* No banking required */
++
++    /* Sanity checks */
++
++    if (!pScreen || !xsize || !ysize || (xsize > width) ||
++        !pBankInfo->SetSourceBank || !pBankInfo->SetDestinationBank ||
++        !pBankInfo->SetSourceAndDestinationBanks ||
++        !pBankInfo->pBankA || !pBankInfo->pBankB ||
++        !pBankInfo->nBankDepth)
++        return FALSE;
++
++    /*
++     * DDX *must* have registered a pixmap format whose depth is
++     * pBankInfo->nBankDepth.  This is not necessarily the rootDepth
++     * pixmap format.
++     */
++    i = 0;
++    while (screenInfo.formats[i].depth != pBankInfo->nBankDepth)
++        if (++i >= screenInfo.numPixmapFormats)
++            return FALSE;
++    nBankBPP = screenInfo.formats[i].bitsPerPixel;
++
++    i = 0;
++    while (screenInfo.formats[i].depth != pScreen->rootDepth)
++        if (++i >= screenInfo.numPixmapFormats)
++            return FALSE;
++
++    if (nBankBPP > screenInfo.formats[i].bitsPerPixel)
++        return FALSE;
++
++    /* Determine banking type */
++    if ((type = miBankDeriveType(pScreen, pBankInfo)) == BANK_NOBANK)
++        return FALSE;
++
++    /* Internal data */
++
++    nBitsPerBank = pBankInfo->BankSize * 8;
++    ServerPad = PixmapBytePad(1, pBankInfo->nBankDepth) * 8;
++    if (nBitsPerBank % ServerPad)
++        return FALSE;
++    nBitsPerScanline = PixmapBytePad(width, pBankInfo->nBankDepth) * 8;
++    nBanks = ((nBitsPerScanline * (ysize - 1)) +
++              (nBankBPP * xsize) + nBitsPerBank - 1) / nBitsPerBank;
++    nPixelsPerScanlinePadUnit = miLCM(ServerPad, nBankBPP) / nBankBPP;
++
++    /* Private areas */
++
++    if (miBankGeneration != serverGeneration)
++        miBankGeneration = serverGeneration;
++
++    if (!(pScreenPriv = (miBankScreenPtr)xnfcalloc(1, sizeof(miBankScreenRec))))
++        return FALSE;
++
++    if (!(pScreenPriv->pBanks =                 /* Allocate and clear */
++        (RegionPtr *)xnfcalloc(nBanks, sizeof(RegionPtr))))
++    {
++        free(pScreenPriv);
++        return FALSE;
++    }
++
++    /*
++     * Translate banks into clipping regions which are themselves clipped
++     * against the screen.  This also ensures that pixels with imbedded bank
++     * boundaries are off-screen.
++     */
++
++    BankBase = 0;
++    maxRects = 0;
++    we = 0;
++    for (iBank = 0;  iBank < nBanks;  iBank++)
++    {
++        xRectangle   pRects[3], *pRect = pRects;
++        unsigned int xb, yb, xe, ye;
++
++        xb = ((BankBase + nBankBPP - 1) % nBitsPerScanline) / nBankBPP;
++        yb =  (BankBase + nBankBPP - 1) / nBitsPerScanline;
++        if (xb >= xsize)
++        {
++            xb = we = 0;
++            yb++;
++        }
++        if (yb >= ysize)
++        {
++            we = 0;
++            break;
++        }
++
++        if (we)
++            break;
++
++        BankBase += nBitsPerBank;
++
++        we = (BankBase % nBitsPerScanline) % nBankBPP;
++        xe = (BankBase % nBitsPerScanline) / nBankBPP;
++        ye =  BankBase / nBitsPerScanline;
++        if (xe >= xsize)
++        {
++            we = xe = 0;
++            ye++;
++        }
++        if (ye >= ysize)
++        {
++            we = xe = 0;
++            ye = ysize;
++        }
++
++        if (yb == ye)
++        {
++            if (xb >= xe)
++                continue;
++
++            pRect->x      = xb;
++            pRect->y      = yb;
++            pRect->width  = xe - xb;
++            pRect->height = 1;
++            maxRects += 2;
++            pRect++;
++        }
++        else
++        {
++            if (xb)
++            {
++                pRect->x      = xb;
++                pRect->y      = yb++;
++                pRect->width  = xsize - xb;
++                pRect->height = 1;
++                maxRects += 2;
++                pRect++;
++            }
++
++            if (yb < ye)
++            {
++                pRect->x      = 0;
++                pRect->y      = yb;
++                pRect->width  = xsize;
++                pRect->height = ye - yb;
++                maxRects += min(pRect->height, 3) + 1;
++                pRect++;
++            }
++
++            if (xe)
++            {
++                pRect->x      = 0;
++                pRect->y      = ye;
++                pRect->width  = xe;
++                pRect->height = 1;
++                maxRects += 2;
++                pRect++;
++            }
++        }
++
++        pScreenPriv->pBanks[iBank] =
++            RECTS_TO_REGION(pScreen, pRect - pRects, pRects, 0);
++        if (!pScreenPriv->pBanks[iBank] ||
++            REGION_NAR(pScreenPriv->pBanks[iBank]))
++        {
++            we = 1;
++            break;
++        }
++    }
++
++    if (we && (iBank < nBanks))
++    {
++        for (i = iBank;  i >= 0;  i--)
++            if (pScreenPriv->pBanks[i])
++                REGION_DESTROY(pScreen, pScreenPriv->pBanks[i]);
++
++        free(pScreenPriv->pBanks);
++        free(pScreenPriv);
++
++        return FALSE;
++    }
++
++    /* Open for business */
++
++    pScreenPriv->type = type;
++    pScreenPriv->nBanks = nBanks;
++    pScreenPriv->maxRects = maxRects;
++    pScreenPriv->nBankBPP = nBankBPP;
++    pScreenPriv->BankInfo = *pBankInfo;
++    pScreenPriv->nBitsPerBank = nBitsPerBank;
++    pScreenPriv->nBitsPerScanline = nBitsPerScanline;
++    pScreenPriv->nPixelsPerScanlinePadUnit = nPixelsPerScanlinePadUnit;
++
++    SCREEN_WRAP(CreateScreenResources, miBankCreateScreenResources);
++    SCREEN_WRAP(ModifyPixmapHeader,    miBankModifyPixmapHeader);
++    SCREEN_WRAP(CloseScreen,           miBankCloseScreen);
++    SCREEN_WRAP(GetImage,              miBankGetImage);
++    SCREEN_WRAP(GetSpans,              miBankGetSpans);
++    SCREEN_WRAP(CreateGC,              miBankCreateGC);
++    SCREEN_WRAP(CopyWindow,            miBankCopyWindow);
++
++    dixSetPrivate(&pScreen->devPrivates, &miBankScreenKey, pScreenPriv);
++
++    return TRUE;
++}
++
++/*
++ * Given various screen attributes, determine the minimum scanline width such
++ * that each scanline is server and DDX padded and any pixels with imbedded
++ * bank boundaries are off-screen.  This function returns -1 if such a width
++ * cannot exist.  This function exists because the DDX needs to be able to
++ * determine this width before initializing a frame buffer.
++ */
++int
++miScanLineWidth(
++    unsigned int     xsize,         /* pixels */
++    unsigned int     ysize,         /* pixels */
++    unsigned int     width,         /* pixels */
++    unsigned long    BankSize,      /* char's */
++    PixmapFormatRec *pBankFormat,
++    unsigned int     nWidthUnit     /* bits */
++)
++{
++    unsigned long nBitsPerBank, nBitsPerScanline, nBitsPerScanlinePadUnit;
++    unsigned long minBitsPerScanline, maxBitsPerScanline;
++
++    /* Sanity checks */
++
++    if (!nWidthUnit || !pBankFormat)
++        return -1;
++
++    nBitsPerBank = BankSize * 8;
++    if (nBitsPerBank % pBankFormat->scanlinePad)
++        return -1;
++
++    if (xsize > width)
++        width = xsize;
++    nBitsPerScanlinePadUnit = miLCM(pBankFormat->scanlinePad, nWidthUnit);
++    nBitsPerScanline =
++        (((width * pBankFormat->bitsPerPixel) + nBitsPerScanlinePadUnit - 1) /
++         nBitsPerScanlinePadUnit) * nBitsPerScanlinePadUnit;
++    width = nBitsPerScanline / pBankFormat->bitsPerPixel;
++
++    if (!xsize || !(nBitsPerBank % pBankFormat->bitsPerPixel))
++        return (int)width;
++
++    /*
++     * Scanlines will be server-pad aligned at this point.  They will also be
++     * a multiple of nWidthUnit bits long.  Ensure that pixels with imbedded
++     * bank boundaries are off-screen.
++     *
++     * It seems reasonable to limit total frame buffer size to 1/16 of the
++     * theoretical maximum address space size.  On a machine with 32-bit
++     * addresses (to 8-bit quantities) this turns out to be 256MB.  Not only
++     * does this provide a simple limiting condition for the loops below, but
++     * it also prevents unsigned long wraparounds.
++     */
++    if (!ysize)
++        return -1;
++
++    minBitsPerScanline = xsize * pBankFormat->bitsPerPixel;
++    if (minBitsPerScanline > nBitsPerBank)
++        return -1;
++
++    if (ysize == 1)
++        return (int)width;
++
++    maxBitsPerScanline =
++        (((unsigned long)(-1) >> 1) - minBitsPerScanline) / (ysize - 1);
++    while (nBitsPerScanline <= maxBitsPerScanline)
++    {
++        unsigned long BankBase, BankUnit;
++
++        BankUnit = ((nBitsPerBank + nBitsPerScanline - 1) / nBitsPerBank) *
++            nBitsPerBank;
++        if (!(BankUnit % nBitsPerScanline))
++            return (int)width;
++
++        for (BankBase = BankUnit;  ;  BankBase += nBitsPerBank)
++        {
++            unsigned long x, y;
++
++            y = BankBase / nBitsPerScanline;
++            if (y >= ysize)
++                return (int)width;
++
++            x = BankBase % nBitsPerScanline;
++            if (!(x % pBankFormat->bitsPerPixel))
++                continue;
++
++            if (x < minBitsPerScanline)
++            {
++                /*
++                 * Skip ahead certain widths by dividing the excess scanline
++                 * amongst the y's.
++                 */
++                y *= nBitsPerScanlinePadUnit;
++                nBitsPerScanline +=
++                    ((x + y - 1) / y) * nBitsPerScanlinePadUnit;
++                width = nBitsPerScanline / pBankFormat->bitsPerPixel;
++                break;
++            }
++
++            if (BankBase != BankUnit)
++                continue;
++
++            if (!(nBitsPerScanline % x))
++                return (int)width;
++
++            BankBase = ((nBitsPerScanline - minBitsPerScanline) /
++                (nBitsPerScanline - x)) * BankUnit;
++        }
++    }
++
++    return -1;
++}
+diff --git a/mi/mibank.h b/mi/mibank.h
+new file mode 100644
+index 000000000..9710619e2
+--- /dev/null
++++ b/mi/mibank.h
+@@ -0,0 +1,112 @@
++/*
++ * Copyright 1997 through 2004 by Marc Aurele La France (TSI @ UQV), tsi@xfree86.org
++ *
++ * Permission to use, copy, modify, distribute, and sell this software and its
++ * documentation for any purpose is hereby granted without fee, provided that
++ * the above copyright notice appear in all copies and that both that copyright
++ * notice and this permission notice appear in supporting documentation, and
++ * that the name of Marc Aurele La France not be used in advertising or
++ * publicity pertaining to distribution of the software without specific,
++ * written prior permission.  Marc Aurele La France makes no representations
++ * about the suitability of this software for any purpose.  It is provided
++ * "as-is" without express or implied warranty.
++ *
++ * MARC AURELE LA FRANCE DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
++ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  IN NO
++ * EVENT SHALL MARC AURELE LA FRANCE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
++ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
++ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
++ * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++
++#ifndef __MIBANK_H__
++#define __MIBANK_H__ 1
++
++#include "scrnintstr.h"
++
++/*
++ * Banking external interface.
++ */
++
++/*
++ * This is the banking function type.  The return value is normally zero.
++ * Non-zero returns can be used to implement the likes of scanline interleave,
++ * etc.
++ */
++typedef int miBankProc(
++    ScreenPtr /*pScreen*/,
++    unsigned int /*iBank*/
++);
++
++typedef miBankProc *miBankProcPtr;
++
++typedef struct _miBankInfo
++{
++    /*
++     * Banking refers to the use of one or more apertures (in the server's
++     * address space) to access various parts of a potentially larger hardware
++     * frame buffer.
++     *
++     * Three different banking schemes are supported:
++     *
++     * Single banking is indicated when pBankA and pBankB are equal and all
++     * three miBankProcPtr's point to the same function.  Here, both reads and
++     * writes through the aperture access the same hardware location.
++     *
++     * Shared banking is indicated when pBankA and pBankB are equal but the
++     * source and destination functions differ.  Here reads through the
++     * aperture do not necessarily access the same hardware location as writes.
++     *
++     * Double banking is indicated when pBankA and pBankB differ.  Here two
++     * independent apertures are used to provide read/write access to
++     * potentially different hardware locations.
++     *
++     * Any other combination will result in no banking.
++     */
++    miBankProcPtr SetSourceBank;                /* Set pBankA bank number */
++    miBankProcPtr SetDestinationBank;           /* Set pBankB bank number */
++    miBankProcPtr SetSourceAndDestinationBanks; /* Set both bank numbers */
++
++    void *pBankA;     /* First aperture location */
++    void *pBankB;     /* First or second aperture location */
++
++    /*
++     * BankSize is in units of sizeof(char) and is the size of each bank.
++     */
++    unsigned long BankSize;
++
++    /*
++     * nBankDepth is the colour depth associated with the maximum number of a
++     * pixel's bits that are simultaneously accessible through the frame buffer
++     * aperture.
++     */
++    unsigned int nBankDepth;
++} miBankInfoRec, *miBankInfoPtr;
++
++extern _X_EXPORT Bool
++miInitializeBanking(
++    ScreenPtr /*pScreen*/,
++    unsigned int /*xsize*/,
++    unsigned int /*ysize*/,
++    unsigned int /*width*/,
++    miBankInfoPtr /*pBankInfo*/
++);
++
++/*
++ * This function determines the minimum screen width, given a initial estimate
++ * and various screen attributes.  DDX needs to determine this width before
++ * initializing the screen.
++ */
++extern _X_EXPORT int
++miScanLineWidth(
++    unsigned int /*xsize*/,
++    unsigned int /*ysize*/,
++    unsigned int /*width*/,
++    unsigned long /*BankSize*/,
++    PixmapFormatRec * /*pBankFormat*/,
++    unsigned int /*nWidthUnit*/
++);
++
++#endif /* __MIBANK_H__ */

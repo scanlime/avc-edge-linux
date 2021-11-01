@@ -1,0 +1,2 @@
+/dev/sda1	/	ext4	rw,relatime	0 0
+none		/tmp	tmpfs	defaults	0 0

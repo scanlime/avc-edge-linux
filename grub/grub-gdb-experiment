@@ -1,0 +1,70 @@
+cd grub-core
+source gdb_grub
+python
+import subprocess
+import tempfile
+import os
+
+def asm(text, bits=32, org=0):
+    with tempfile.TemporaryDirectory() as dir:
+        asm_path = os.path.join(dir, "temp.asm")
+        with open(asm_path, "w") as asm_file:
+            asm_file.write("\tbits %d\n" % bits)
+            asm_file.write("\torg 0x%x\n" % org)
+            asm_file.write("\t%s\n" % text)
+        try:
+            subprocess.check_call(["nasm", asm_path])
+        except:
+            subprocess.check_call(["cat", "-n", asm_path])
+            raise
+        with open(os.path.join(dir, "temp"), "rb") as bin_file:
+            bin = bin_file.read()
+        return bin
+
+class SoCRegs(gdb.Command):
+    """Dump the system on chip registers"""
+
+    def __init__(self):
+        super().__init__("soc-regs", gdb.COMMAND_USER)
+
+    def invoke(self, arg, from_tty):
+        code = asm("""
+            pusha
+
+            mov ecx, 0x100
+            push eax
+            mov edi, eax
+            mov ax, 0x6996
+            rep stosw
+            pop eax
+
+            mov edi, eax
+            mov ecx, 0x100
+            mov bl, 0
+        reg_read_loop:
+        	mov dx, 0x22
+            mov al, bl
+        	out dx, al
+            out dx, al  ; extra bus cycle
+        	inc dx
+        	in al, dx
+            mov [edi], al
+            inc edi
+            inc bl
+            loop reg_read_loop
+            popa
+        	int 3
+        """)
+        code_buffer = 0xa00000
+        output_buffer = code_buffer + 0x1000
+        gdb.selected_inferior().write_memory(code_buffer, code)
+        saved_eip = gdb.parse_and_eval("$eip")
+        saved_eax = gdb.parse_and_eval("$eax")
+        gdb.parse_and_eval("$eip = 0x%x" % code_buffer)
+        gdb.parse_and_eval("$eax = 0x%x" % output_buffer)
+        gdb.execute("cont")
+        gdb.execute("x/256bx 0x%x" % output_buffer)
+        gdb.parse_and_eval("$eip = 0x%x" % saved_eip)
+        gdb.parse_and_eval("$eax = 0x%x" % saved_eax)
+
+SoCRegs()

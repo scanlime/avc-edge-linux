@@ -1,0 +1,39 @@
+diff --git a/grub-core/disk/i386/pc/biosdisk.c b/grub-core/disk/i386/pc/biosdisk.c
+index 8ca250c77..5bc9d6e8c 100644
+--- a/grub-core/disk/i386/pc/biosdisk.c
++++ b/grub-core/disk/i386/pc/biosdisk.c
+@@ -529,11 +529,6 @@ grub_biosdisk_rw (int cmd, grub_disk_t disk,
+       hoff = head % data->heads;
+       coff = head / data->heads;
+ 
+-      if (coff >= data->cylinders)
+-	return grub_error (GRUB_ERR_OUT_OF_RANGE,
+-			   N_("attempt to read or write outside of disk `%s'"),
+-			   disk->name);
+-
+       if (grub_biosdisk_rw_standard (cmd + 0x02, data->drive,
+ 				     coff, hoff, soff, size, segment))
+ 	{
+diff --git a/grub-core/kern/disk_common.c b/grub-core/kern/disk_common.c
+index e09fba8db..aa4ea7612 100644
+--- a/grub-core/kern/disk_common.c
++++ b/grub-core/kern/disk_common.c
+@@ -29,17 +29,7 @@ grub_disk_adjust_range (grub_disk_t disk, grub_disk_addr_t *sector,
+       *sector += start;
+     }
+ 
+-  /* Transform total_sectors to number of 512B blocks.  */
+-  total_sectors = disk->total_sectors << (disk->log_sector_size - GRUB_DISK_SECTOR_BITS);
+-
+-  /*
+-   * Some drivers have problems with disks above reasonable sizes.
+-   * Clamp the size to GRUB_DISK_MAX_SECTORS. Just one condition is enough
+-   * since GRUB_DISK_SIZE_UNKNOWN is always above GRUB_DISK_MAX_SECTORS,
+-   * assuming a maximum 4 KiB sector size.
+-   */
+-  if (total_sectors > GRUB_DISK_MAX_SECTORS)
+-    total_sectors = GRUB_DISK_MAX_SECTORS;
++  total_sectors = GRUB_DISK_MAX_SECTORS;
+ 
+   if ((total_sectors <= *sector
+        || ((*offset + size + GRUB_DISK_SECTOR_SIZE - 1)
