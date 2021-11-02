@@ -111,7 +111,7 @@ RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
-        tmux minicom \
+        tmux minicom ppp \
         xorg-server@custom xf86-video-chips@custom
 
 COPY etc/fstab /etc/
@@ -187,4 +187,3 @@ COPY --from=debugroot /bin /debugroot/bin
 COPY --from=debugroot /usr /debugroot/usr
 COPY --from=debugroot /lib /debugroot/lib
 COPY --from=aports_builder /src /debugroot/src
-
