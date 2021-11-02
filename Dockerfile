@@ -112,6 +112,7 @@ RUN echo @custom /packages >> /etc/apk/repositories
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
         tmux minicom ppp \
+        xdpyinfo xev xhost xeyes rxvt-unicode \
         xorg-server@custom xf86-video-chips@custom
 
 COPY etc/fstab /etc/
@@ -119,6 +120,10 @@ COPY etc/xorg.conf /etc/
 COPY grub/grub.cfg /boot/grub/
 RUN setup-alpine -q -f /etc/setup-alpine.conf
 RUN echo "root:vote" | chpasswd
+
+# Serial console by default
+RUN echo ttyS2 >> /etc/securetty && \
+        echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100
 
 # Trim out large things we aren't using
 RUN rm -R \

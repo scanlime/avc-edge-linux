@@ -543,22 +543,62 @@ index edd91c745..029a74281 100644
      /**
       * Key used to match this device with its name in an array of
 diff --git a/hw/xfree86/int10/generic.c b/hw/xfree86/int10/generic.c
-index 8d5c4daf3..f0905e258 100644
+index 8d5c4daf3..54477ca1f 100644
 --- a/hw/xfree86/int10/generic.c
 +++ b/hw/xfree86/int10/generic.c
-@@ -204,6 +204,19 @@ xf86ExtendedInitInt10(int entityIndex, int Flags)
+@@ -102,13 +102,11 @@ static void *sysMem = NULL;
+ static Bool
+ readIntVec(struct pci_device *dev, unsigned char *buf, int len)
+ {
+-    void *map;
+-
+-    if (pci_device_map_legacy(dev, 0, len, 0, &map))
+-        return FALSE;
+-
+-    memcpy(buf, map, len);
+-    pci_device_unmap_legacy(dev, map, len);
++    void *map = xf86MapVidMem(0, 0, 0, len);
++    if (map) {
++        memcpy(buf, map, len);
++        xf86UnMapVidMem(0, map, len);
++    }
+ 
+     return TRUE;
+ }
+@@ -141,11 +139,7 @@ xf86ExtendedInitInt10(int entityIndex, int Flags)
+     INTPriv(pInt)->alloc = (void *) xnfcalloc(1, ALLOC_ENTRIES(getpagesize()));
+     pInt->pScrn = pScrn;
+     base = INTPriv(pInt)->base = xnfalloc(SYS_BIOS);
+-
+-    /* FIXME: Shouldn't this be a failure case?  Leaving dev as NULL seems like
+-     * FIXME: an error
+-     */
+-    pInt->dev = xf86GetPciInfoForEntity(entityIndex);
++    pInt->dev = 0;
+ 
+     /*
+      * we need to map video RAM MMIO as some chipsets map mmio
+@@ -153,9 +147,6 @@ xf86ExtendedInitInt10(int entityIndex, int Flags)
+      */
+     MapVRam(pInt);
+ #ifdef _PC
+-    if (!sysMem)
+-        pci_device_map_legacy(pInt->dev, V_BIOS, BIOS_SIZE + SYS_BIOS - V_BIOS,
+-                              PCI_DEV_MAP_FLAG_WRITABLE, &sysMem);
+     INTPriv(pInt)->sysMem = sysMem;
+ 
+     if (!readIntVec(pInt->dev, base, LOW_PAGE_SIZE)) {
+@@ -204,6 +195,17 @@ xf86ExtendedInitInt10(int entityIndex, int Flags)
              }
              INTPriv(pInt)->highMemory = GET_HIGH_BASE(rom_device->rom_size);
              break;
 +        case BUS_ISA:
 +    	    vbiosMem = (unsigned char *)sysMem + bios_location;
-+#if 0
 +	    memset(vbiosMem, 0, V_BIOS_SIZE);
 +	    if (xf86ReadBIOS(bios_location, 0, vbiosMem, V_BIOS_SIZE)
 +		< V_BIOS_SIZE)
 +		xf86DrvMsg(screen, X_WARNING,
 +	                       "Unable to retrieve all of segment 0x%x.\n",bios_location);
-+#endif
 +    	    if (!int10_check_bios(screen, bios_location >> 4, vbiosMem)) {
 +    	        xf86DrvMsg(screen,X_ERROR,"Cannot read V_BIOS (4)\n");
 +    		goto error1;
@@ -566,6 +606,31 @@ index 8d5c4daf3..f0905e258 100644
          }
          default:
              goto error1;
+@@ -291,10 +293,7 @@ MapVRam(xf86Int10InfoPtr pInt)
+ {
+     int pagesize = getpagesize();
+     int size = ((VRAM_SIZE + pagesize - 1) / pagesize) * pagesize;
+-
+-    pci_device_map_legacy(pInt->dev, V_RAM, size, PCI_DEV_MAP_FLAG_WRITABLE,
+-                          &(INTPriv(pInt)->vRam));
+-    pInt->io = pci_legacy_open_io(pInt->dev, 0, 64 * 1024);
++    INTPriv(pInt)->vRam = xf86MapVidMem(0, VIDMEM_FRAMEBUFFER, V_RAM, size);
+ }
+ 
+ static void
+@@ -302,10 +301,8 @@ UnmapVRam(xf86Int10InfoPtr pInt)
+ {
+     int pagesize = getpagesize();
+     int size = ((VRAM_SIZE + pagesize - 1) / pagesize) * pagesize;
+-
+-    pci_device_unmap_legacy(pInt->dev, INTPriv(pInt)->vRam, size);
+-    pci_device_close_io(pInt->dev, pInt->io);
+-    pInt->io = NULL;
++    xf86UnMapVidMem(0, INTPriv(pInt)->vRam, size);
++    INTPriv(pInt)->vRam = 0;
+ }
+ 
+ Bool
 diff --git a/hw/xfree86/loader/xf86sym.c b/hw/xfree86/loader/xf86sym.c
 new file mode 100644
 index 000000000..2d646bcb4
@@ -3846,6 +3911,303 @@ index 7897aae22..8e620c22a 100755
  #include "micmap.h"
  #include "miline.h"
  #include "mipointer.h"
+diff --git a/hw/xfree86/vgahw/vgaHW.c b/hw/xfree86/vgahw/vgaHW.c
+index 7223fc031..c16cf5ab1 100644
+--- a/hw/xfree86/vgahw/vgaHW.c
++++ b/hw/xfree86/vgahw/vgaHW.c
+@@ -30,14 +30,12 @@
+ 
+ #include "xf86cmap.h"
+ 
+-#include "Pci.h"
+-
+ #ifndef SAVE_FONT1
+ #define SAVE_FONT1 1
+ #endif
+ 
+ /*
+- * These used to be OS-specific, which made this module have an undesirable
++ * These used to be OgrS-specific, which made this module have an undesirable
+  * OS dependency.  Define them by default for all platforms.
+  */
+ #ifndef NEED_SAVED_CMAP
+@@ -161,67 +159,67 @@ static CARD8 defaultDAC[768] = {
+ static void
+ stdWriteCrtc(vgaHWPtr hwp, CARD8 index, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, hwp->IOBase + VGA_CRTC_INDEX_OFFSET, index);
+-    pci_io_write8(hwp->io, hwp->IOBase + VGA_CRTC_DATA_OFFSET, value);
++    outb(hwp->IOBase + VGA_CRTC_INDEX_OFFSET, index);
++    outb(hwp->IOBase + VGA_CRTC_DATA_OFFSET, value);
+ }
+ 
+ static CARD8
+ stdReadCrtc(vgaHWPtr hwp, CARD8 index)
+ {
+-    pci_io_write8(hwp->io, hwp->IOBase + VGA_CRTC_INDEX_OFFSET, index);
+-    return pci_io_read8(hwp->io, hwp->IOBase + VGA_CRTC_DATA_OFFSET);
++    outb(hwp->IOBase + VGA_CRTC_INDEX_OFFSET, index);
++    return inb(hwp->IOBase + VGA_CRTC_DATA_OFFSET);
+ }
+ 
+ static void
+ stdWriteGr(vgaHWPtr hwp, CARD8 index, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_GRAPH_INDEX, index);
+-    pci_io_write8(hwp->io, VGA_GRAPH_DATA, value);
++    outb(VGA_GRAPH_INDEX, index);
++    outb(VGA_GRAPH_DATA, value);
+ }
+ 
+ static CARD8
+ stdReadGr(vgaHWPtr hwp, CARD8 index)
+ {
+-    pci_io_write8(hwp->io, VGA_GRAPH_INDEX, index);
+-    return pci_io_read8(hwp->io, VGA_GRAPH_DATA);
++    outb(VGA_GRAPH_INDEX, index);
++    return inb(VGA_GRAPH_DATA);
+ }
+ 
+ static void
+ stdWriteSeq(vgaHWPtr hwp, CARD8 index, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_SEQ_INDEX, index);
+-    pci_io_write8(hwp->io, VGA_SEQ_DATA, value);
++    outb(VGA_SEQ_INDEX, index);
++    outb(VGA_SEQ_DATA, value);
+ }
+ 
+ static CARD8
+ stdReadSeq(vgaHWPtr hwp, CARD8 index)
+ {
+-    pci_io_write8(hwp->io, VGA_SEQ_INDEX, index);
+-    return pci_io_read8(hwp->io, VGA_SEQ_DATA);
++    outb(VGA_SEQ_INDEX, index);
++    return inb(VGA_SEQ_DATA);
+ }
+ 
+ static CARD8
+ stdReadST00(vgaHWPtr hwp)
+ {
+-    return pci_io_read8(hwp->io, VGA_IN_STAT_0);
++    return inb(VGA_IN_STAT_0);
+ }
+ 
+ static CARD8
+ stdReadST01(vgaHWPtr hwp)
+ {
+-    return pci_io_read8(hwp->io, hwp->IOBase + VGA_IN_STAT_1_OFFSET);
++    return inb(hwp->IOBase + VGA_IN_STAT_1_OFFSET);
+ }
+ 
+ static CARD8
+ stdReadFCR(vgaHWPtr hwp)
+ {
+-    return pci_io_read8(hwp->io, VGA_FEATURE_R);
++    return inb(VGA_FEATURE_R);
+ }
+ 
+ static void
+ stdWriteFCR(vgaHWPtr hwp, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, hwp->IOBase + VGA_FEATURE_W_OFFSET, value);
++    outb(hwp->IOBase + VGA_FEATURE_W_OFFSET, value);
+ }
+ 
+ static void
+@@ -232,9 +230,9 @@ stdWriteAttr(vgaHWPtr hwp, CARD8 index, CARD8 value)
+     else
+         index |= 0x20;
+ 
+-    (void) pci_io_read8(hwp->io, hwp->IOBase + VGA_IN_STAT_1_OFFSET);
+-    pci_io_write8(hwp->io, VGA_ATTR_INDEX, index);
+-    pci_io_write8(hwp->io, VGA_ATTR_DATA_W, value);
++    (void) inb(hwp->IOBase + VGA_IN_STAT_1_OFFSET);
++    outb(VGA_ATTR_INDEX, index);
++    outb(VGA_ATTR_DATA_W, value);
+ }
+ 
+ static CARD8
+@@ -245,85 +243,85 @@ stdReadAttr(vgaHWPtr hwp, CARD8 index)
+     else
+         index |= 0x20;
+ 
+-    (void) pci_io_read8(hwp->io, hwp->IOBase + VGA_IN_STAT_1_OFFSET);
+-    pci_io_write8(hwp->io, VGA_ATTR_INDEX, index);
+-    return pci_io_read8(hwp->io, VGA_ATTR_DATA_R);
++    (void) inb(hwp->IOBase + VGA_IN_STAT_1_OFFSET);
++    outb(VGA_ATTR_INDEX, index);
++    return inb(VGA_ATTR_DATA_R);
+ }
+ 
+ static void
+ stdWriteMiscOut(vgaHWPtr hwp, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_MISC_OUT_W, value);
++    outb(VGA_MISC_OUT_W, value);
+ }
+ 
+ static CARD8
+ stdReadMiscOut(vgaHWPtr hwp)
+ {
+-    return pci_io_read8(hwp->io, VGA_MISC_OUT_R);
++    return inb(VGA_MISC_OUT_R);
+ }
+ 
+ static void
+ stdEnablePalette(vgaHWPtr hwp)
+ {
+-    (void) pci_io_read8(hwp->io, hwp->IOBase + VGA_IN_STAT_1_OFFSET);
+-    pci_io_write8(hwp->io, VGA_ATTR_INDEX, 0x00);
++    (void) inb(hwp->IOBase + VGA_IN_STAT_1_OFFSET);
++    outb(VGA_ATTR_INDEX, 0x00);
+     hwp->paletteEnabled = TRUE;
+ }
+ 
+ static void
+ stdDisablePalette(vgaHWPtr hwp)
+ {
+-    (void) pci_io_read8(hwp->io, hwp->IOBase + VGA_IN_STAT_1_OFFSET);
+-    pci_io_write8(hwp->io, VGA_ATTR_INDEX, 0x20);
++    (void) inb(hwp->IOBase + VGA_IN_STAT_1_OFFSET);
++    outb(VGA_ATTR_INDEX, 0x20);
+     hwp->paletteEnabled = FALSE;
+ }
+ 
+ static void
+ stdWriteDacMask(vgaHWPtr hwp, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_DAC_MASK, value);
++    outb(VGA_DAC_MASK, value);
+ }
+ 
+ static CARD8
+ stdReadDacMask(vgaHWPtr hwp)
+ {
+-    return pci_io_read8(hwp->io, VGA_DAC_MASK);
++    return inb(VGA_DAC_MASK);
+ }
+ 
+ static void
+ stdWriteDacReadAddr(vgaHWPtr hwp, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_DAC_READ_ADDR, value);
++    outb(VGA_DAC_READ_ADDR, value);
+ }
+ 
+ static void
+ stdWriteDacWriteAddr(vgaHWPtr hwp, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_DAC_WRITE_ADDR, value);
++    outb(VGA_DAC_WRITE_ADDR, value);
+ }
+ 
+ static void
+ stdWriteDacData(vgaHWPtr hwp, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_DAC_DATA, value);
++    outb(VGA_DAC_DATA, value);
+ }
+ 
+ static CARD8
+ stdReadDacData(vgaHWPtr hwp)
+ {
+-    return pci_io_read8(hwp->io, VGA_DAC_DATA);
++    return inb(VGA_DAC_DATA);
+ }
+ 
+ static CARD8
+ stdReadEnable(vgaHWPtr hwp)
+ {
+-    return pci_io_read8(hwp->io, VGA_ENABLE);
++    return inb(VGA_ENABLE);
+ }
+ 
+ static void
+ stdWriteEnable(vgaHWPtr hwp, CARD8 value)
+ {
+-    pci_io_write8(hwp->io, VGA_ENABLE, value);
++    outb(VGA_ENABLE, value);
+ }
+ 
+ void
+@@ -353,8 +351,6 @@ vgaHWSetStdFuncs(vgaHWPtr hwp)
+     hwp->readDacData = stdReadDacData;
+     hwp->readEnable = stdReadEnable;
+     hwp->writeEnable = stdWriteEnable;
+-
+-    hwp->io = pci_legacy_open_io(hwp->dev, 0, 64 * 1024);
+ }
+ 
+ /*
+@@ -1711,7 +1707,8 @@ vgaHWGetHWRec(ScrnInfoPtr scrp)
+     hwp->MapSize = 0;
+     hwp->pScrn = scrp;
+ 
+-    hwp->dev = xf86GetPciInfoForEntity(scrp->entityList[0]);
++    hwp->dev = 0;
++    hwp->io = 0;
+ 
+     return TRUE;
+ }
+@@ -1725,8 +1722,6 @@ vgaHWFreeHWRec(ScrnInfoPtr scrp)
+         if (!hwp)
+             return;
+ 
+-        pci_device_close_io(hwp->dev, hwp->io);
+-
+         free(hwp->FontInfo1);
+         free(hwp->FontInfo2);
+         free(hwp->TextInfo);
+@@ -1760,8 +1755,7 @@ vgaHWMapMem(ScrnInfoPtr scrp)
+      * for now.
+      */
+     DebugF("Mapping VGAMem\n");
+-    pci_device_map_legacy(hwp->dev, hwp->MapPhys, hwp->MapSize,
+-                          PCI_DEV_MAP_FLAG_WRITABLE, &hwp->Base);
++    hwp->Base = xf86MapVidMem(0, VIDMEM_FRAMEBUFFER, hwp->MapPhys, hwp->MapSize);
+     return hwp->Base != NULL;
+ }
+ 
+@@ -1774,7 +1768,7 @@ vgaHWUnmapMem(ScrnInfoPtr scrp)
+         return;
+ 
+     DebugF("Unmapping VGAMem\n");
+-    pci_device_unmap_legacy(hwp->dev, hwp->Base, hwp->MapSize);
++    xf86UnMapVidMem(0, hwp->Base, hwp->MapSize);
+     hwp->Base = NULL;
+ }
+ 
+@@ -2024,24 +2018,24 @@ xf86GetClocks(ScrnInfoPtr pScrn, int num, Bool (*ClockFunc) (ScrnInfoPtr, int),
+         cnt = 0;
+         sync = 200000;
+ 
+-        while ((pci_io_read8(hwp->io, status) & maskval) == 0x00)
++        while ((inb(status) & maskval) == 0x00)
+             if (sync-- == 0)
+                 goto finish;
+         /* Something appears to be happening, so reset sync count */
+         sync = 200000;
+-        while ((pci_io_read8(hwp->io, status) & maskval) == maskval)
++        while ((inb(status) & maskval) == maskval)
+             if (sync-- == 0)
+                 goto finish;
+         /* Something appears to be happening, so reset sync count */
+         sync = 200000;
+-        while ((pci_io_read8(hwp->io, status) & maskval) == 0x00)
++        while ((inb(status) & maskval) == 0x00)
+             if (sync-- == 0)
+                 goto finish;
+ 
+         for (rcnt = 0; rcnt < 5; rcnt++) {
+-            while (!(pci_io_read8(hwp->io, status) & maskval))
++            while (!(inb(status) & maskval))
+                 cnt++;
+-            while ((pci_io_read8(hwp->io, status) & maskval))
++            while ((inb(status) & maskval))
+                 cnt++;
+         }
+ 
 diff --git a/include/gc.h b/include/gc.h
 index 53f9c29e1..5d134012d 100644
 --- a/include/gc.h
