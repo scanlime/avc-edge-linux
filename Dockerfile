@@ -84,6 +84,7 @@ RUN make install
 COPY grub/setup.sh /setup.sh
 RUN dd if=/dev/urandom bs=512 count=4 of=/setup_done
 RUN mkdir -p /boot/grub && touch /boot/grub/grub.cfg
+RUN rm /usr/local/share/grub/unicode.pf2
 
 ###############################################################
 FROM $I386_BASE_IMAGE as debugroot
@@ -112,7 +113,7 @@ RUN echo @custom /packages >> /etc/apk/repositories
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
         tmux minicom ppp \
-        xdpyinfo xev xhost xeyes \
+        xdpyinfo xterm xscreensaver-extras \
         xorg-server@custom xf86-video-chips@custom
 
 COPY etc/fstab /etc/
@@ -123,7 +124,7 @@ RUN echo "root:vote" | chpasswd
 
 # Serial console by default
 RUN echo ttyS2 >> /etc/securetty && \
-        echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100
+  echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100 >> /etc/inittab
 
 # Trim out large things we aren't using
 RUN rm -R \
@@ -138,6 +139,9 @@ RUN rm -R \
 	/usr/lib/libssl.* \
 	/usr/lib/libtls.* \
 	/usr/lib/libdrm_* \
+        /usr/lib/libxml2* \
+        /usr/share/mime \
+        /usr/bin/update-mime-database \
 	/usr/share/fonts/misc/10x20.pcf.gz \
 	/usr/share/fonts/misc/k14.pcf.gz \
 	/usr/share/fonts/misc/12x13ja.pcf.gz \
