@@ -374,10 +374,10 @@ index 08f656b30..64bd3211e 100644
  #include "xf86str.h"
 diff --git a/hw/xfree86/common/xf86isaBus.c b/hw/xfree86/common/xf86isaBus.c
 new file mode 100644
-index 000000000..a62008177
+index 000000000..0b85f19d3
 --- /dev/null
 +++ b/hw/xfree86/common/xf86isaBus.c
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,112 @@
 +/*
 + * Copyright (c) 1997-2000 by The XFree86 Project, Inc.
 + *
@@ -445,6 +445,7 @@ index 000000000..a62008177
 +    p = xf86Entities[num];
 +    p->driver = drvp;
 +    p->chipset = chipset;
++    p->bus.type = BUS_ISA;
 +    p->active = active;
 +    p->inUse = FALSE;
 +    xf86AddDevToEntity(num, dev);
