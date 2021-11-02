@@ -112,7 +112,7 @@ RUN echo @custom /packages >> /etc/apk/repositories
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
         tmux minicom ppp \
-        xdpyinfo xev xhost xeyes rxvt \
+        xdpyinfo xev xhost xeyes \
         xorg-server@custom xf86-video-chips@custom
 
 COPY etc/fstab /etc/
