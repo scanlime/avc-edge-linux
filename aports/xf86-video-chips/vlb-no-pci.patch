@@ -1,5 +1,5 @@
 diff --git a/src/ct_driver.c b/src/ct_driver.c
-index b4b8422..4654a68 100644
+index b4b8422..053c802 100644
 --- a/src/ct_driver.c
 +++ b/src/ct_driver.c
 @@ -134,12 +134,9 @@
@@ -32,7 +32,7 @@ index b4b8422..4654a68 100644
  
  /*
   * This contains the functions needed by the server after loading the driver
-@@ -516,20 +510,13 @@ _X_EXPORT DriverRec CHIPS = {
+@@ -516,20 +510,11 @@ _X_EXPORT DriverRec CHIPS = {
  	CHIPS_VERSION,
  	CHIPS_DRIVER_NAME,
  	CHIPSIdentify,
@@ -47,13 +47,13 @@ index b4b8422..4654a68 100644
  	NULL,
 -
 -#ifdef XSERVER_LIBPCIACCESS
- 	chips_device_match,
- 	CHIPSPciProbe,
+-	chips_device_match,
+-	CHIPSPciProbe,
 -#endif
  };
  
  static SymTabRec CHIPSChipsets[] = {
-@@ -809,7 +796,6 @@ CHIPSAvailableOptions(int chipid, int busid)
+@@ -809,7 +794,6 @@ CHIPSAvailableOptions(int chipid, int busid)
  }
  
  /* Mandatory */
@@ -61,7 +61,7 @@ index b4b8422..4654a68 100644
  Bool
  CHIPSPciProbe(DriverPtr drv, int entity_num, struct pci_device * dev,
  	    intptr_t match_data)
-@@ -873,7 +859,8 @@ CHIPSPciProbe(DriverPtr drv, int entity_num, struct pci_device * dev,
+@@ -873,7 +857,8 @@ CHIPSPciProbe(DriverPtr drv, int entity_num, struct pci_device * dev,
  
      return (pScrn != NULL);
  }
@@ -71,7 +71,7 @@ index b4b8422..4654a68 100644
  static Bool
  CHIPSProbe(DriverPtr drv, int flags)
  {
-@@ -891,74 +878,6 @@ CHIPSProbe(DriverPtr drv, int flags)
+@@ -891,74 +876,6 @@ CHIPSProbe(DriverPtr drv, int flags)
  					  &devSections)) <= 0) {
  	return FALSE;
      }
@@ -146,7 +146,7 @@ index b4b8422..4654a68 100644
  
  #ifdef HAVE_ISA
      /* Isa Bus */
-@@ -996,9 +915,7 @@ CHIPSProbe(DriverPtr drv, int flags)
+@@ -996,9 +913,7 @@ CHIPSProbe(DriverPtr drv, int flags)
      free(devSections);
      return foundScreen;
  }
@@ -156,7 +156,7 @@ index b4b8422..4654a68 100644
  static int
  chipsFindIsaDevice(GDevPtr dev)
  {
-@@ -1082,7 +999,6 @@ chipsFindIsaDevice(GDevPtr dev)
+@@ -1082,7 +997,6 @@ chipsFindIsaDevice(GDevPtr dev)
      }
      return found;
  }
@@ -164,7 +164,7 @@ index b4b8422..4654a68 100644
  
  /* Mandatory */
  Bool
-@@ -1118,9 +1034,6 @@ CHIPSPreInit(ScrnInfoPtr pScrn, int flags)
+@@ -1118,9 +1032,6 @@ CHIPSPreInit(ScrnInfoPtr pScrn, int flags)
      /* This is the general case */
      for (i = 0; i<pScrn->numEntities; i++) {
  	cPtr->pEnt = xf86GetEntityInfo(pScrn->entityList[i]);
@@ -174,7 +174,7 @@ index b4b8422..4654a68 100644
  	/* If we are using libpciaccess this is already set in CHIPSPciProbe.
  	 * If we are using something else we need to set it here.
  	 */
-@@ -1137,11 +1050,6 @@ CHIPSPreInit(ScrnInfoPtr pScrn, int flags)
+@@ -1137,11 +1048,6 @@ CHIPSPreInit(ScrnInfoPtr pScrn, int flags)
  	if (cPtr->pEnt->location.type == BUS_PCI) {
  	    pciPtr = xf86GetPciInfoForEntity(cPtr->pEnt->index);
  	    cPtr->PciInfo = pciPtr;
@@ -186,7 +186,7 @@ index b4b8422..4654a68 100644
  	}
      }
      /* INT10 */
-@@ -1376,14 +1284,6 @@ CHIPSPreInit(ScrnInfoPtr pScrn, int flags)
+@@ -1376,14 +1282,6 @@ CHIPSPreInit(ScrnInfoPtr pScrn, int flags)
  	}
      }
  
@@ -201,7 +201,7 @@ index b4b8422..4654a68 100644
      vbeFree(cPtr->pVbe);
      cPtr->pVbe = NULL;
      return TRUE;
-@@ -1408,9 +1308,6 @@ chipsPreInitHiQV(ScrnInfoPtr pScrn, int flags)
+@@ -1408,9 +1306,6 @@ chipsPreInitHiQV(ScrnInfoPtr pScrn, int flags)
      CHIPSPanelSizePtr Size = &cPtr->PanelSize;
      CHIPSMemClockPtr MemClk = &cPtr->MemClock;
      CHIPSClockPtr SaveClk = &(cPtr->SavedReg.Clock);
@@ -211,7 +211,7 @@ index b4b8422..4654a68 100644
  
      /* Set pScrn->monitor */
      pScrn->monitor = pScrn->confScreen->monitor;
-@@ -1572,10 +1469,6 @@ chipsPreInitHiQV(ScrnInfoPtr pScrn, int flags)
+@@ -1572,10 +1467,6 @@ chipsPreInitHiQV(ScrnInfoPtr pScrn, int flags)
  	        cPtr->FbAddress =  PCI_REGION_BASE(cPtr->PciInfo, 0, REGION_MEM) & 0xff800000;
  
  	    from = X_PROBED;
@@ -222,7 +222,7 @@ index b4b8422..4654a68 100644
  	} else 	{
  	    if (cPtr->pEnt->device->MemBase) {
  		cPtr->FbAddress = cPtr->pEnt->device->MemBase;
-@@ -1587,14 +1480,6 @@ chipsPreInitHiQV(ScrnInfoPtr pScrn, int flags)
+@@ -1587,14 +1478,6 @@ chipsPreInitHiQV(ScrnInfoPtr pScrn, int flags)
  				    (0x80 & (cPtr->readXR(cPtr, 0x05)))) << 16;
  		from = X_PROBED;
  	    }
@@ -237,7 +237,7 @@ index b4b8422..4654a68 100644
  	}
      }
      if (cPtr->Flags & ChipsLinearSupport) {
-@@ -2424,9 +2309,6 @@ chipsPreInitWingine(ScrnInfoPtr pScrn, int flags)
+@@ -2424,9 +2307,6 @@ chipsPreInitWingine(ScrnInfoPtr pScrn, int flags)
      CHIPSClockPtr SaveClk = &(cPtr->SavedReg.Clock);
      Bool useLinear = FALSE;
      const char *s;
@@ -247,7 +247,7 @@ index b4b8422..4654a68 100644
  
      /* Set pScrn->monitor */
      pScrn->monitor = pScrn->confScreen->monitor;
-@@ -2630,14 +2512,6 @@ chipsPreInitWingine(ScrnInfoPtr pScrn, int flags)
+@@ -2630,14 +2510,6 @@ chipsPreInitWingine(ScrnInfoPtr pScrn, int flags)
  	    cPtr->FbAddress |= ((mask  & (cPtr->readXR(cPtr, 0x08))) << 16);
  	    from = X_PROBED;
  	}
@@ -262,7 +262,7 @@ index b4b8422..4654a68 100644
      }
  
      if (useLinear) {
-@@ -2748,25 +2622,6 @@ chipsPreInitWingine(ScrnInfoPtr pScrn, int flags)
+@@ -2748,25 +2620,6 @@ chipsPreInitWingine(ScrnInfoPtr pScrn, int flags)
  	    ErrorF("DR[%X] = %X\n",i,cPtr->Regs32[i]);
  #endif
  	}
@@ -288,7 +288,7 @@ index b4b8422..4654a68 100644
      }
  
      cPtr->ClockMulFactor = ((pScrn->bitsPerPixel >= 8) ? bytesPerPixel : 1);
-@@ -2892,9 +2747,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
+@@ -2892,9 +2745,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
      CHIPSClockPtr SaveClk = &(cPtr->SavedReg.Clock);
      Bool useLinear = FALSE;
      const char *s;
@@ -298,7 +298,7 @@ index b4b8422..4654a68 100644
  
      /* Set pScrn->monitor */
      pScrn->monitor = pScrn->confScreen->monitor;
-@@ -3098,12 +2950,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
+@@ -3098,12 +2948,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
  	}
  	if (cPtr->pEnt->location.type == BUS_PCI) {
  	    cPtr->FbAddress =  PCI_REGION_BASE(cPtr->PciInfo, 0, REGION_MEM) & 0xff800000;
@@ -311,7 +311,7 @@ index b4b8422..4654a68 100644
  	} else {
  	    if (cPtr->pEnt->device->MemBase) {
  		cPtr->FbAddress = cPtr->pEnt->device->MemBase;
-@@ -3127,14 +2973,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
+@@ -3127,14 +2971,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
  		}
  		from = X_PROBED;
  	    }
@@ -326,7 +326,7 @@ index b4b8422..4654a68 100644
  	}
      }
  
-@@ -3434,25 +3272,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
+@@ -3434,25 +3270,6 @@ chipsPreInit655xx(ScrnInfoPtr pScrn, int flags)
  	    ErrorF("DR[%X] = %X\n",i,cPtr->Regs32[i]);
  #endif
  	}
@@ -352,7 +352,7 @@ index b4b8422..4654a68 100644
      }
  
      /* sync reset ignored on this chipset */
-@@ -3849,9 +3668,6 @@ CHIPSScreenInit(SCREEN_INIT_ARGS_DECL)
+@@ -3849,9 +3666,6 @@ CHIPSScreenInit(SCREEN_INIT_ARGS_DECL)
      int init_picture = 0;
      VisualPtr visual;
      int allocatebase, freespace, currentaddr;
@@ -362,7 +362,7 @@ index b4b8422..4654a68 100644
      unsigned char *FBStart;
      int height, width, displayWidth;
      CHIPSEntPtr cPtrEnt = NULL;
-@@ -4322,14 +4138,6 @@ CHIPSScreenInit(SCREEN_INIT_ARGS_DECL)
+@@ -4322,14 +4136,6 @@ CHIPSScreenInit(SCREEN_INIT_ARGS_DECL)
  		NULL, CMAP_RELOAD_ON_MODE_SWITCH | CMAP_PALETTED_TRUECOLOR))
  	return FALSE;
  
@@ -377,7 +377,7 @@ index b4b8422..4654a68 100644
  #ifdef ENABLE_SILKEN_MOUSE
  	xf86SetSilkenMouse(pScreen);
  #endif
-@@ -6903,47 +6711,11 @@ chipsMapMem(ScrnInfoPtr pScrn)
+@@ -6903,47 +6709,11 @@ chipsMapMem(ScrnInfoPtr pScrn)
      if (cPtr->Flags & ChipsLinearSupport) {
  	if (cPtr->UseMMIO) {
  	    if (IS_HiQV(cPtr)) {
@@ -425,7 +425,7 @@ index b4b8422..4654a68 100644
  	    }
  
  	    if (cPtr->MMIOBase == NULL)
-@@ -6966,40 +6738,14 @@ chipsMapMem(ScrnInfoPtr pScrn)
+@@ -6966,40 +6736,14 @@ chipsMapMem(ScrnInfoPtr pScrn)
  	    }
  	  }
  
@@ -466,7 +466,7 @@ index b4b8422..4654a68 100644
  	    /* 69030 MMIO Fix.
  	     *
  	     * The hardware lets us map the PipeB data registers
-@@ -7009,11 +6755,6 @@ chipsMapMem(ScrnInfoPtr pScrn)
+@@ -7009,11 +6753,6 @@ chipsMapMem(ScrnInfoPtr pScrn)
  	     * pipe and to toggle between them as necessary. -GHB
  	     */
  	    if (cPtr->Flags & ChipsDualChannelSupport)
@@ -478,7 +478,7 @@ index b4b8422..4654a68 100644
  	    {
  	      void** result = (void**)&cPtr->MMIOBasePipeB;
  	      int err = pci_device_map_range(cPtr->PciInfo,
-@@ -7024,7 +6765,6 @@ chipsMapMem(ScrnInfoPtr pScrn)
+@@ -7024,7 +6763,6 @@ chipsMapMem(ScrnInfoPtr pScrn)
  	      if (err)
  		return FALSE;
  	    }
@@ -486,7 +486,7 @@ index b4b8422..4654a68 100644
  
  	    cPtr->MMIOBasePipeA = cPtr->MMIOBaseVGA;
  	}
-@@ -7048,39 +6788,21 @@ chipsUnmapMem(ScrnInfoPtr pScrn)
+@@ -7048,39 +6786,21 @@ chipsUnmapMem(ScrnInfoPtr pScrn)
  
      if (cPtr->Flags & ChipsLinearSupport) {
  	if (IS_HiQV(cPtr)) {
