@@ -113,7 +113,7 @@ RUN echo @custom /packages >> /etc/apk/repositories
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
         tmux minicom ppp \
-        xdpyinfo xterm xscreensaver-extras \
+        xdpyinfo xterm xclock fvwm xset \
         xorg-server@custom xf86-video-chips@custom
 
 COPY etc/fstab /etc/
@@ -139,9 +139,6 @@ RUN rm -R \
 	/usr/lib/libssl.* \
 	/usr/lib/libtls.* \
 	/usr/lib/libdrm_* \
-        /usr/lib/libxml2* \
-        /usr/share/mime \
-        /usr/bin/update-mime-database \
 	/usr/share/fonts/misc/10x20.pcf.gz \
 	/usr/share/fonts/misc/k14.pcf.gz \
 	/usr/share/fonts/misc/12x13ja.pcf.gz \

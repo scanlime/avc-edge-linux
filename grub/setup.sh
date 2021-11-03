@@ -12,7 +12,7 @@ mount -o bind /mnt/boot /boot
 df -h /mnt
 umount /mnt
 sync
-#tune2fs -j /dev/sda1
+tune2fs -j /dev/sda1
 
 sync
 dd if=/setup_done of=/dev/sdb bs=512 oflag=direct
