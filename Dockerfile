@@ -47,6 +47,20 @@ USER root
 RUN mkdir /src && mv /home/builder/*/src/* /src/
 
 ###############################################################
+FROM $I386_BASE_IMAGE as xdaliclock_builder
+
+RUN apk add wget make gcc libc-dev libx11-dev libxt-dev libxext-dev
+RUN adduser -D builder
+USER builder
+WORKDIR /home/builder
+
+RUN wget -q -O xdaliclock.tar.gz https://www.jwz.org/xdaliclock/xdaliclock-2.44.tar.gz
+RUN tar zxf xdaliclock.tar.gz
+WORKDIR /home/builder/xdaliclock-2.44/X11
+RUN ./configure
+RUN make -j16
+
+###############################################################
 FROM $I386_BASE_IMAGE as bootloader_installer
 ARG DISK_SIZE_HEADS
 ARG DISK_SIZE_SECTORS
@@ -107,12 +121,14 @@ FROM $I386_BASE_IMAGE as rootfs
 
 COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
+COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/bin/
 COPY --from=aports_builder /home/builder/packages/builder/ /packages/
 RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
         tmux minicom ppp \
+        libx11 libxt libxext \
         xdpyinfo xterm xclock fvwm xset \
         xorg-server@custom xf86-video-chips@custom
 
