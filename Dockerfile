@@ -169,7 +169,6 @@ RUN rm -R \
         /packages \
         /sbin/apk \
         /etc/apk \
-        /usr/share/X11/xkb/symbols \
         /var/cache \
         /var/log/* \
         /usr/lib/pkgconfig \
