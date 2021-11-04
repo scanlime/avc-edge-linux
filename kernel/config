@@ -685,6 +685,7 @@ CONFIG_DEFAULT_TCP_CONG="cubic"
 # CONFIG_IEEE802154 is not set
 # CONFIG_NET_SCHED is not set
 # CONFIG_DCB is not set
+CONFIG_DNS_RESOLVER=y
 # CONFIG_BATMAN_ADV is not set
 # CONFIG_OPENVSWITCH is not set
 # CONFIG_VSOCKETS is not set
@@ -795,7 +796,7 @@ CONFIG_BLK_DEV_LOOP=y
 CONFIG_BLK_DEV_LOOP_MIN_COUNT=8
 # CONFIG_BLK_DEV_CRYPTOLOOP is not set
 # CONFIG_BLK_DEV_DRBD is not set
-# CONFIG_BLK_DEV_NBD is not set
+CONFIG_BLK_DEV_NBD=y
 # CONFIG_BLK_DEV_RAM is not set
 # CONFIG_CDROM_PKTCDVD is not set
 # CONFIG_ATA_OVER_ETH is not set
@@ -987,17 +988,8 @@ CONFIG_PCMCIA_3C589=y
 # end of PCS device drivers
 
 # CONFIG_PLIP is not set
-CONFIG_PPP=y
-# CONFIG_PPP_BSDCOMP is not set
-# CONFIG_PPP_DEFLATE is not set
-# CONFIG_PPP_FILTER is not set
-# CONFIG_PPP_MPPE is not set
-# CONFIG_PPP_MULTILINK is not set
-# CONFIG_PPPOE is not set
-# CONFIG_PPP_ASYNC is not set
-# CONFIG_PPP_SYNC_TTY is not set
+# CONFIG_PPP is not set
 # CONFIG_SLIP is not set
-CONFIG_SLHC=y
 
 #
 # Host-side USB support is needed for USB Network Adapter support
@@ -1612,12 +1604,7 @@ CONFIG_MEMFD_CREATE=y
 # end of Pseudo filesystems
 
 # CONFIG_MISC_FILESYSTEMS is not set
-CONFIG_NETWORK_FILESYSTEMS=y
-# CONFIG_NFS_FS is not set
-# CONFIG_CEPH_FS is not set
-# CONFIG_CIFS is not set
-# CONFIG_CODA_FS is not set
-# CONFIG_AFS_FS is not set
+# CONFIG_NETWORK_FILESYSTEMS is not set
 CONFIG_NLS=y
 CONFIG_NLS_DEFAULT="utf8"
 # CONFIG_NLS_CODEPAGE_437 is not set
@@ -1676,7 +1663,11 @@ CONFIG_IO_WQ=y
 #
 # Security options
 #
-# CONFIG_KEYS is not set
+CONFIG_KEYS=y
+# CONFIG_KEYS_REQUEST_CACHE is not set
+# CONFIG_PERSISTENT_KEYRINGS is not set
+# CONFIG_ENCRYPTED_KEYS is not set
+# CONFIG_KEY_DH_OPERATIONS is not set
 # CONFIG_SECURITY_DMESG_RESTRICT is not set
 # CONFIG_SECURITY is not set
 # CONFIG_SECURITYFS is not set
@@ -1842,10 +1833,12 @@ CONFIG_CRYPTO_LIB_POLY1305_RSIZE=1
 # CONFIG_CRYPTO_LIB_POLY1305 is not set
 # CONFIG_CRYPTO_LIB_CHACHA20POLY1305 is not set
 # CONFIG_CRYPTO_HW is not set
+# CONFIG_ASYMMETRIC_KEY_TYPE is not set
 
 #
 # Certificates for signature checking
 #
+# CONFIG_SYSTEM_BLACKLIST_KEYRING is not set
 # end of Certificates for signature checking
 
 #
@@ -1882,6 +1875,7 @@ CONFIG_CRC32_SLICEBY8=y
 CONFIG_ZLIB_INFLATE=y
 # CONFIG_XZ_DEC is not set
 CONFIG_GENERIC_ALLOCATOR=y
+CONFIG_ASSOCIATIVE_ARRAY=y
 CONFIG_HAS_IOMEM=y
 CONFIG_HAS_IOPORT_MAP=y
 CONFIG_HAS_DMA=y

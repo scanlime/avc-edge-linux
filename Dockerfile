@@ -13,7 +13,7 @@ ARG LINUX_URL
 
 RUN apk add \
   gcc make linux-headers libc-dev \
-  wget less bc zstd xz flex bison \
+  wget less bc zstd xz flex bison perl \
   openssl-dev elfutils-dev ncurses-dev
 
 RUN adduser -D builder
@@ -118,7 +118,15 @@ RUN make install
 COPY grub/setup.sh /setup.sh
 RUN dd if=/dev/urandom bs=512 count=4 of=/setup_done
 RUN mkdir -p /boot/grub && touch /boot/grub/grub.cfg
-RUN rm /usr/local/share/grub/unicode.pf2
+
+RUN rm \
+        /usr/local/share/grub/unicode.pf2 \
+        /usr/local/lib/grub/i386-pc/gcry* \
+        /usr/local/lib/grub/i386-pc/gfx* \
+        /usr/local/lib/grub/i386-pc/zstd* \
+        /usr/local/lib/grub/i386-pc/pgp* \
+        /usr/local/lib/grub/i386-pc/btrfs* \
+        /usr/local/lib/grub/i386-pc/regexp*
 
 ###############################################################
 FROM $I386_BASE_IMAGE as debugroot
@@ -141,17 +149,14 @@ FROM $I386_BASE_IMAGE as rootfs
 
 COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
-COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/bin/
-COPY --from=micropolis_builder /home/builder/usr/ /usr/
 COPY --from=aports_builder /home/builder/packages/builder/ /packages/
 RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
-        alpine-base libstdc++ \
-        tmux minicom ltrace strace socat \
-        libx11 libxt libxext libxpm \
-        setxkbmap xkeyboard-config xdpyinfo xset xhost \
-        xterm xclock twm \
+        alpine-base dhcp-openrc dropbear-openrc \
+        tmux minicom nbd dhclient dropbear \
+        libx11 libxt libxext libxpm libstdc++ \
+        xset xhost xterm twm \
         xorg-server@custom xf86-video-chips@custom
 
 COPY etc/fstab /etc/
@@ -167,13 +172,10 @@ RUN echo ttyS2 >> /etc/securetty && \
 # Trim out large things we aren't using
 RUN rm -R \
         /packages \
-        /sbin/apk \
-        /etc/apk \
         /var/cache \
-        /var/log/* \
         /usr/lib/pkgconfig \
         /etc/ssl \
-        /lib/libapk.* \
+        /usr/lib/xorg/modules/extensions \
         /usr/lib/engines-* \
         /usr/lib/dri \
         /usr/lib/vdpau \
@@ -182,6 +184,8 @@ RUN rm -R \
         /usr/lib/libepoxy.* \
         /usr/lib/libglapi.* \
         /usr/lib/libdrm_* \
+        /usr/share/X11/locale/el_GR.UTF-8 \
+        /usr/share/X11/locale/fi_FI.UTF-8 \
         /usr/share/fonts/misc/10x20.pcf.gz \
         /usr/share/fonts/misc/k14.pcf.gz \
         /usr/share/fonts/misc/12x13ja.pcf.gz \
