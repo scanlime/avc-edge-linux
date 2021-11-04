@@ -1,0 +1,14 @@
+diff --git a/micropolis-activity/src/tclx/config.mk b/micropolis-activity/src/tclx/config.mk
+index 22d43cb..63efbc4 100755
+--- a/micropolis-activity/src/tclx/config.mk
++++ b/micropolis-activity/src/tclx/config.mk
+@@ -78,7 +78,7 @@ DO_STRIPPING=false
+ # compiler and linker.  Also the yacc program you wish to use.
+ #
+ AR=ar
+-XCFLAGS=
++XCFLAGS=-DTCL_IEEE_FP_MATH
+ XLDFLAGS=
+ YACC=yacc
+ #YACC=bison -b y
+

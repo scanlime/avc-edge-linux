@@ -61,6 +61,26 @@ RUN ./configure
 RUN make -j16
 
 ###############################################################
+FROM $I386_BASE_IMAGE as micropolis_builder
+
+RUN apk add \
+        wget make gcc git patch bison \
+        libc-dev libx11-dev libxpm-dev libxext-dev
+
+RUN adduser -D builder
+USER builder
+WORKDIR /home/builder
+
+RUN git clone https://github.com/SimHacker/micropolis.git
+WORKDIR /home/builder/micropolis/micropolis-activity
+RUN git checkout b0c5a3f495ebabbc51d5e45dac948d8e40fc53ee
+
+COPY micropolis/ ./
+RUN patch -p2 -i tcl-build-fix.patch
+RUN make
+RUN make DESTDIR=/home/builder install
+
+###############################################################
 FROM $I386_BASE_IMAGE as bootloader_installer
 ARG DISK_SIZE_HEADS
 ARG DISK_SIZE_SECTORS
@@ -110,11 +130,11 @@ RUN apk --update-cache --allow-untrusted add \
         musl-dbg libstdc++ \
         xorg-server@custom \
         xorg-server-dbg@custom \
-	xf86-video-chips@custom
+        xf86-video-chips@custom
 
 COPY --from=aports_builder \
-	/src/xf86-video-chips-1.4.0/src/.libs/chips_drv.so \
-	/usr/lib/xorg/modules/drivers/chips_drv.so
+        /src/xf86-video-chips-1.4.0/src/.libs/chips_drv.so \
+        /usr/lib/xorg/modules/drivers/chips_drv.so
 
 ###############################################################
 FROM $I386_BASE_IMAGE as rootfs
@@ -122,14 +142,16 @@ FROM $I386_BASE_IMAGE as rootfs
 COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/bin/
+COPY --from=micropolis_builder /home/builder/usr/ /usr/
 COPY --from=aports_builder /home/builder/packages/builder/ /packages/
 RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
-        tmux minicom ppp \
-        libx11 libxt libxext \
-        xdpyinfo xterm xclock fvwm xset \
+        tmux minicom ltrace strace \
+        libx11 libxt libxext libxpm \
+        setxkbmap xkeyboard-config xdpyinfo xset \
+        xterm xclock twm \
         xorg-server@custom xf86-video-chips@custom
 
 COPY etc/fstab /etc/
@@ -151,15 +173,18 @@ RUN rm -R \
         /var/cache \
         /var/log/* \
         /usr/lib/pkgconfig \
-	/etc/ssl \
-	/usr/lib/libssl.* \
-	/usr/lib/libtls.* \
-	/usr/lib/libdrm_* \
-	/usr/share/fonts/misc/10x20.pcf.gz \
-	/usr/share/fonts/misc/k14.pcf.gz \
-	/usr/share/fonts/misc/12x13ja.pcf.gz \
-	/usr/share/fonts/misc/18x18ja.pcf.gz \
-	/usr/share/fonts/misc/18x18ko.pcf.gz
+        /etc/ssl \
+        /usr/lib/dri \
+        /usr/lib/vdpau \
+        /usr/lib/libGL* \
+        /usr/lib/libssl.* \
+        /usr/lib/libtls.* \
+        /usr/lib/libdrm_* \
+        /usr/share/fonts/misc/10x20.pcf.gz \
+        /usr/share/fonts/misc/k14.pcf.gz \
+        /usr/share/fonts/misc/12x13ja.pcf.gz \
+        /usr/share/fonts/misc/18x18ja.pcf.gz \
+        /usr/share/fonts/misc/18x18ko.pcf.gz
 
 ###############################################################
 FROM $I386_BASE_IMAGE as image_builder
