@@ -148,9 +148,9 @@ RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
         alpine-base libstdc++ \
-        tmux minicom ltrace strace \
+        tmux minicom ltrace strace socat \
         libx11 libxt libxext libxpm \
-        setxkbmap xkeyboard-config xdpyinfo xset \
+        setxkbmap xkeyboard-config xdpyinfo xset xhost \
         xterm xclock twm \
         xorg-server@custom xf86-video-chips@custom
 
@@ -174,11 +174,14 @@ RUN rm -R \
         /var/log/* \
         /usr/lib/pkgconfig \
         /etc/ssl \
+        /lib/libapk.* \
+        /usr/lib/engines-* \
         /usr/lib/dri \
         /usr/lib/vdpau \
         /usr/lib/libGL* \
-        /usr/lib/libssl.* \
-        /usr/lib/libtls.* \
+        /usr/lib/libwayland* \
+        /usr/lib/libepoxy.* \
+        /usr/lib/libglapi.* \
         /usr/lib/libdrm_* \
         /usr/share/fonts/misc/10x20.pcf.gz \
         /usr/share/fonts/misc/k14.pcf.gz \

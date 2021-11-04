@@ -14,7 +14,7 @@ build:
 run: build
 	cp -f build/disk.img build/rw-disk.img
 	chmod 0600 build/rw-disk.img
-	qemu-system-i386 \
+	qemu-system-i386 -curses \
 		-machine isapc -cpu 486 -m 32 \
 		-drive if=ide,index=0,format=raw,file=build/rw-disk.img \
 		-chardev socket,id=debug,host=127.0.0.1,port=1234,server=on,wait=off \
