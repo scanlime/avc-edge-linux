@@ -241,6 +241,7 @@ COPY --from=debugroot /bin /debugroot/bin
 COPY --from=debugroot /usr /debugroot/usr
 COPY --from=debugroot /lib /debugroot/lib
 COPY --from=aports_builder /src /debugroot/src
+COPY --from=kernel_builder /home/builder/linux /debugroot/src/linux
 
 # Build large rootfs for network use
 COPY --from=rootfs_large / /netroot/
