@@ -6,10 +6,20 @@ build:
 	docker build -t ${PREFIX} .
 	docker create --name ${PREFIX}-tmp ${PREFIX}
 	docker cp ${PREFIX}-tmp:/work/disk.img build/
+	docker cp ${PREFIX}-tmp:/work/netroot.img build/
 	docker cp ${PREFIX}-tmp:/bootloader_installer/home/builder/grub/grub-core build/
 	docker cp ${PREFIX}-tmp:/debugroot build/
 	docker rm ${PREFIX}-tmp
 	chmod a-w build/disk.img
+
+build/netroot.img: build
+
+build/rw-netroot.img: build/netroot.img
+	cp -f build/netroot.img build/rw-netroot.img
+	chmod 0600 build/rw-netroot.img
+
+nbd:
+	nbd-server 19999 `pwd`/build/rw-netroot.img -d -M 1 -C /dev/null
 
 run: build
 	cp -f build/disk.img build/rw-disk.img

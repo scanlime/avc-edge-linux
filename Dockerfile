@@ -145,7 +145,7 @@ COPY --from=aports_builder \
         /usr/lib/xorg/modules/drivers/chips_drv.so
 
 ###############################################################
-FROM $I386_BASE_IMAGE as rootfs
+FROM $I386_BASE_IMAGE as rootfs_common
 
 COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
@@ -154,7 +154,7 @@ RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
         alpine-base dhcp-openrc dropbear-openrc \
-        tmux minicom nbd dhclient dropbear \
+        pcmciautils tmux minicom nbd dhclient dropbear \
         libx11 libxt libxext libxpm libstdc++ \
         xset xhost xterm twm \
         xorg-server@custom xf86-video-chips@custom
@@ -168,6 +168,15 @@ RUN echo "root:vote" | chpasswd
 # Serial console by default
 RUN echo ttyS2 >> /etc/securetty && \
   echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100 >> /etc/inittab
+
+###############################################################
+FROM rootfs_common as rootfs_large
+
+COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/local/bin/
+COPY --from=micropolis_builder /home/builder/usr/ /usr/
+
+###############################################################
+FROM rootfs_common as rootfs_small
 
 # Trim out large things we aren't using
 RUN rm -R \
@@ -198,6 +207,7 @@ ARG DISK_SIZE_CYLINDERS
 ARG DISK_SIZE_HEADS
 ARG DISK_SIZE_SECTORS
 ARG GRUB_RESERVED_TRACKS=2
+ARG NET_ROOT_SIZE=1G
 
 RUN apk add \
   qemu-system-i386 util-linux e2fsprogs wget less xxd bash
@@ -215,7 +225,7 @@ RUN echo $[ $DISK_SIZE_CYLINDERS * $DISK_SIZE_HEADS * $DISK_SIZE_SECTORS ] > tot
   fdisk -cdos -walways -C$DISK_SIZE_CYLINDERS -H$DISK_SIZE_HEADS -S$DISK_SIZE_SECTORS disk.img < fdisk.command
 
 # Build main rootfs as ext2 then add a journal after setting up grub
-COPY --from=rootfs / /rootfs/
+COPY --from=rootfs_small / /rootfs/
 RUN mkfs.ext2 -d /rootfs/ -b 1024 -m 0 -v rootfs.img `cat rootfs.kilobytes` && \
   dd if=rootfs.img of=disk.img bs=512 seek=`cat rootfs.sector` conv=notrunc
 
@@ -240,3 +250,7 @@ COPY --from=debugroot /bin /debugroot/bin
 COPY --from=debugroot /usr /debugroot/usr
 COPY --from=debugroot /lib /debugroot/lib
 COPY --from=aports_builder /src /debugroot/src
+
+# Build large rootfs for network use
+COPY --from=rootfs_large / /netroot/
+RUN mkfs.ext2 -d /netroot/ -b 1024 -m 0 -v netroot.img $NET_ROOT_SIZE
