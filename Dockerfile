@@ -207,6 +207,14 @@ SHELL ["/bin/bash", "-c"]
 RUN mkdir /work
 WORKDIR /work
 
+# Prepare userspace debug symbols
+COPY --from=debugroot /bin /debugroot/bin
+COPY --from=debugroot /usr /debugroot/usr
+COPY --from=debugroot /lib /debugroot/lib
+COPY --from=aports_builder /src /debugroot/src
+COPY --from=kernel_builder /home/builder/linux /debugroot/
+COPY --from=bootloader_installer /home/builder/grub/grub-core /debugroot/
+
 # Partition with careful attention to DOS CHS geometry
 RUN echo $[ $DISK_SIZE_CYLINDERS * $DISK_SIZE_HEADS * $DISK_SIZE_SECTORS ] > total.sectors && \
   echo $[ $GRUB_RESERVED_TRACKS * $DISK_SIZE_SECTORS ] > rootfs.sector && \
@@ -235,13 +243,6 @@ RUN qemu-system-i386 \
 
 # Check that we completed setup.sh
 RUN diff <(xxd bootloader_installer.img | head) <(xxd /bootloader_installer/setup_done | head)
-
-# Prepare userspace debug symbols
-COPY --from=debugroot /bin /debugroot/bin
-COPY --from=debugroot /usr /debugroot/usr
-COPY --from=debugroot /lib /debugroot/lib
-COPY --from=aports_builder /src /debugroot/src
-COPY --from=kernel_builder /home/builder/linux /debugroot/src/linux
 
 # Build large rootfs for network use
 COPY --from=rootfs_large / /netroot/
