@@ -13,7 +13,7 @@ ARG LINUX_URL
 
 RUN apk add \
   gcc make linux-headers libc-dev \
-  wget less bc zstd xz flex bison perl \
+  patch wget less bc zstd xz flex bison perl \
   openssl-dev elfutils-dev ncurses-dev
 
 RUN adduser -D builder
@@ -25,7 +25,11 @@ RUN mkdir linux && tar Jxf linux.tar.xz --strip-components=1 -C linux
 WORKDIR /home/builder/linux
 
 COPY kernel/config .config
+COPY kernel/pcmcia-debug.patch .
+RUN patch -p1 -i pcmcia-debug.patch
+
 RUN make -j16
+RUN make INSTALL_MOD_PATH=/home/builder modules_install
 
 ###############################################################
 FROM $I386_BASE_IMAGE as aports_builder
@@ -148,16 +152,15 @@ COPY --from=aports_builder \
 FROM $I386_BASE_IMAGE as rootfs_common
 
 COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
+COPY --from=kernel_builder /home/builder/lib/ /lib/
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 COPY --from=aports_builder /home/builder/packages/builder/ /packages/
 RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
         alpine-base dhcp-openrc dropbear-openrc \
-        pcmciautils tmux minicom nbd dhclient dropbear \
-        libx11 libxt libxext libxpm libstdc++ \
-        xset xhost xterm twm \
-        xorg-server@custom xf86-video-chips@custom
+        pcmciautils eudev udev-init-scripts-openrc \
+        tmux nbd dhclient dropbear
 
 COPY etc/fstab /etc/
 COPY etc/xorg.conf /etc/
@@ -172,6 +175,12 @@ RUN echo ttyS2 >> /etc/securetty && \
 ###############################################################
 FROM rootfs_common as rootfs_large
 
+RUN apk --update-cache --allow-untrusted add \
+        minicom vim tmux gdb xterm \
+        libx11 libxt libxext libxpm libstdc++ \
+        xset xhost xterm twm \
+        xorg-server@custom xf86-video-chips@custom
+
 COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/local/bin/
 COPY --from=micropolis_builder /home/builder/usr/ /usr/
 
@@ -181,25 +190,7 @@ FROM rootfs_common as rootfs_small
 # Trim out large things we aren't using
 RUN rm -R \
         /packages \
-        /var/cache \
-        /usr/lib/pkgconfig \
-        /etc/ssl \
-        /usr/lib/xorg/modules/extensions \
-        /usr/lib/engines-* \
-        /usr/lib/dri \
-        /usr/lib/vdpau \
-        /usr/lib/libGL* \
-        /usr/lib/libwayland* \
-        /usr/lib/libepoxy.* \
-        /usr/lib/libglapi.* \
-        /usr/lib/libdrm_* \
-        /usr/share/X11/locale/el_GR.UTF-8 \
-        /usr/share/X11/locale/fi_FI.UTF-8 \
-        /usr/share/fonts/misc/10x20.pcf.gz \
-        /usr/share/fonts/misc/k14.pcf.gz \
-        /usr/share/fonts/misc/12x13ja.pcf.gz \
-        /usr/share/fonts/misc/18x18ja.pcf.gz \
-        /usr/share/fonts/misc/18x18ko.pcf.gz
+        /var/cache
 
 ###############################################################
 FROM $I386_BASE_IMAGE as image_builder

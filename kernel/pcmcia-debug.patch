@@ -1,0 +1,39 @@
+diff --git a/drivers/pcmcia/cs.c b/drivers/pcmcia/cs.c
+index e211e2619680..0066d01881a4 100644
+--- a/drivers/pcmcia/cs.c
++++ b/drivers/pcmcia/cs.c
+@@ -9,6 +9,8 @@
+  * (C) 1999		David A. Hinds
+  */
+ 
++#define DEBUG
++
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/init.h>
+diff --git a/drivers/pcmcia/ds.c b/drivers/pcmcia/ds.c
+index bd81aa64d011..c1bb46a1dc5e 100644
+--- a/drivers/pcmcia/ds.c
++++ b/drivers/pcmcia/ds.c
+@@ -10,6 +10,8 @@
+  * (C) 2003 - 2010	Dominik Brodowski
+  */
+ 
++#define DEBUG
++
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
+diff --git a/drivers/pcmcia/i82365.c b/drivers/pcmcia/i82365.c
+index 891ccea2cccb..c0a6aa2a0ca0 100644
+--- a/drivers/pcmcia/i82365.c
++++ b/drivers/pcmcia/i82365.c
+@@ -31,6 +31,8 @@
+     
+ ======================================================================*/
+ 
++#define DEBUG
++
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/init.h>
