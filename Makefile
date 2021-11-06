@@ -31,7 +31,7 @@ build/rw-disk.img: build build/disk.img
 	chmod 0600 build/rw-disk.img
 
 .PHONY: nbd
-nbd: build
+nbd: build build/rw-netroot.img
 	nbd-server 19999 `pwd`/build/rw-netroot.img -d -M 1 -C /dev/null
 
 .PHONY: run
@@ -43,7 +43,7 @@ run: build build/rw-disk.img
 		-device isa-serial,iobase=0x3e8,chardev=debug,id=com3
 
 .PHONY: flash
-flash: build
+flash: build build/disk.img
 	scp build/disk.img crouton:tmp/disk.img
 	ssh crouton lsblk /dev/sda '&&' sudo dd if=tmp/disk.img of=/dev/sda bs=64K
 
