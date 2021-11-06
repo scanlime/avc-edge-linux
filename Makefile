@@ -11,6 +11,9 @@ build:
 clean:
 	rm -Rf ./build
 
+.PHONY: debug
+debug: build build/debugroot build/rw-netroot.img build/rw-disk.img
+
 build/debugroot: build
 	docker cp ${PREFIX}-tmp:/debugroot build/
 
@@ -59,4 +62,3 @@ menuconfig:
 	 	make menuconfig
 	docker cp ${PREFIX}-tmp:/home/builder/linux/.config kernel/config
 	docker rm ${PREFIX}-tmp
-

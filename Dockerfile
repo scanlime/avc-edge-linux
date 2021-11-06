@@ -212,8 +212,8 @@ COPY --from=debugroot /bin /debugroot/bin
 COPY --from=debugroot /usr /debugroot/usr
 COPY --from=debugroot /lib /debugroot/lib
 COPY --from=aports_builder /src /debugroot/src
-COPY --from=kernel_builder /home/builder/linux /debugroot/
-COPY --from=bootloader_installer /home/builder/grub/grub-core /debugroot/
+COPY --from=kernel_builder /home/builder/linux /debugroot/linux
+COPY --from=bootloader_installer /home/builder/grub/grub-core /debugroot/grub-core
 
 # Partition with careful attention to DOS CHS geometry
 RUN echo $[ $DISK_SIZE_CYLINDERS * $DISK_SIZE_HEADS * $DISK_SIZE_SECTORS ] > total.sectors && \
