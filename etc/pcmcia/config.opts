@@ -6,5 +6,5 @@ include port 0xc00-0xcf7
 # Avoid regions that overlap ROMCS0
 # Use a region cut out from low memory in grub.cfg
 # (see am486 manual 19.5.2.3, warning on ambiguous decoding priority)
-include memory 0x80000-0x8fff
+include memory 0x80000-0x8ffff
 
