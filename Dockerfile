@@ -27,6 +27,8 @@ WORKDIR /home/builder/linux
 COPY kernel/config .config
 RUN make -j16
 RUN make INSTALL_MOD_PATH=/home/builder modules_install
+RUN rm vmlinux-gdb.py && ln -s scripts/gdb/vmlinux-gdb.py .
+
 
 ###############################################################
 FROM $I386_BASE_IMAGE as aports_builder
