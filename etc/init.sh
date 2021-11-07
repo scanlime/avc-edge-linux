@@ -7,13 +7,10 @@ while true; do
                 mount -o remount,rw /
                 mount -a
                 mkdir -p /netroot
-
-                modprobe nbd
                 if [ ! -b /dev/nbd0 ]; then
                         mknod /dev/nbd0 b 43 0
                 fi
 
-                modprobe i82365
                 /lib/udev/pcmcia-socket-startup 0
                 /lib/udev/pcmcia-socket-startup 1
 
