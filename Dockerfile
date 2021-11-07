@@ -244,4 +244,4 @@ RUN diff <(xxd bootloader_installer.img | head) <(xxd /bootloader_installer/setu
 
 # Build large rootfs for network use
 COPY --from=rootfs_large / /netroot/
-RUN mkfs.ext2 -d /netroot/ -b 1024 -m 0 -v netroot.img $NET_ROOT_SIZE
+RUN mkfs.ext2 -d /netroot/ -b 4096 -m 0 -v netroot.img $NET_ROOT_SIZE
