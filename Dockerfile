@@ -151,32 +151,33 @@ FROM $I386_BASE_IMAGE as rootfs_common
 COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
 COPY --from=kernel_builder /home/builder/lib/ /lib/
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
-COPY --from=aports_builder /home/builder/packages/builder/ /packages/
-RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
-        alpine-base dhcp-openrc \
-        pcmciautils eudev udev-init-scripts-openrc \
-        tmux nbd dhclient
+        pcmciautils nbd dhclient
 
 COPY etc/fstab /etc/
-COPY etc/pcmcia /etc/
+COPY etc/pcmcia/config.opts /etc/pcmcia/
 COPY grub/grub.cfg /boot/grub/
-RUN echo "root:vote" | chpasswd
-
-# Serial console by default
-RUN echo ttyS2 >> /etc/securetty && \
-  echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100 >> /etc/inittab
 
 ###############################################################
 FROM rootfs_common as rootfs_large
 
+COPY --from=aports_builder /home/builder/packages/builder/ /usr/local/pkg/
+RUN echo @custom /usr/local/pkg >> /etc/apk/repositories
+
+RUN echo "root:vote" | chpasswd
+
 RUN apk --update-cache --allow-untrusted add \
         minicom vim tmux gdb xterm \
+        alpine-base eudev udev-init-scripts-openrc \
         dropbear dropbear-openrc \
         libx11 libxt libxext libxpm libstdc++ \
         xset xhost xterm twm \
         xorg-server@custom xf86-video-chips@custom
+
+# Serial console by default
+RUN echo ttyS2 >> /etc/securetty && \
+  echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100 >> /etc/inittab
 
 COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/local/bin/
 COPY --from=micropolis_builder /home/builder/usr/ /usr/
@@ -185,10 +186,12 @@ COPY etc/xorg.conf /etc/
 ###############################################################
 FROM rootfs_common as rootfs_small
 
-# Trim out large things we aren't using
 RUN rm -R \
-        /packages \
-        /var/cache
+        /var/cache \
+        /sbin/init
+
+COPY etc/init.sh /sbin/init
+
 
 ###############################################################
 FROM $I386_BASE_IMAGE as image_builder

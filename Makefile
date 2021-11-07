@@ -25,16 +25,16 @@ build/disk.img: build
 	docker cp ${PREFIX}-tmp:/work/disk.img build/
 	chmod a-w build/disk.img
 
-build/rw-netroot.img: build build/netroot.img
+build/rw-netroot.img: build/netroot.img
 	cp -f build/netroot.img build/rw-netroot.img
 	chmod 0600 build/rw-netroot.img
 
-build/rw-disk.img: build build/disk.img
+build/rw-disk.img: build/disk.img
 	cp -f build/disk.img build/rw-disk.img
 	chmod 0600 build/rw-disk.img
 
 .PHONY: nbd
-nbd: build build/rw-netroot.img
+nbd: build/rw-netroot.img
 	nbd-server 19999 `pwd`/build/rw-netroot.img -d -M 1 -C /dev/null
 
 .PHONY: run
