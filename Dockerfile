@@ -25,9 +25,6 @@ RUN mkdir linux && tar Jxf linux.tar.xz --strip-components=1 -C linux
 WORKDIR /home/builder/linux
 
 COPY kernel/config .config
-COPY kernel/pcmcia-debug.patch .
-RUN patch -p1 -i pcmcia-debug.patch
-
 RUN make -j16
 RUN make INSTALL_MOD_PATH=/home/builder modules_install
 
@@ -158,14 +155,13 @@ COPY --from=aports_builder /home/builder/packages/builder/ /packages/
 RUN echo @custom /packages >> /etc/apk/repositories
 
 RUN apk --update-cache --allow-untrusted add \
-        alpine-base dhcp-openrc dropbear-openrc \
+        alpine-base dhcp-openrc \
         pcmciautils eudev udev-init-scripts-openrc \
-        tmux nbd dhclient dropbear
+        tmux nbd dhclient
 
 COPY etc/fstab /etc/
-COPY etc/xorg.conf /etc/
+COPY etc/pcmcia /etc/
 COPY grub/grub.cfg /boot/grub/
-RUN setup-alpine -q -f /etc/setup-alpine.conf
 RUN echo "root:vote" | chpasswd
 
 # Serial console by default
@@ -177,12 +173,14 @@ FROM rootfs_common as rootfs_large
 
 RUN apk --update-cache --allow-untrusted add \
         minicom vim tmux gdb xterm \
+        dropbear dropbear-openrc \
         libx11 libxt libxext libxpm libstdc++ \
         xset xhost xterm twm \
         xorg-server@custom xf86-video-chips@custom
 
 COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/local/bin/
 COPY --from=micropolis_builder /home/builder/usr/ /usr/
+COPY etc/xorg.conf /etc/
 
 ###############################################################
 FROM rootfs_common as rootfs_small
