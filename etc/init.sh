@@ -15,7 +15,6 @@ while true; do
                 /lib/udev/pcmcia-socket-startup 1
 
                 modprobe 3c589_cs
-                modprobe pata_pcmcia
                 dhclient eth0
                 ip addr
                 ntpd -qndp 10.0.0.1
