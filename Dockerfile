@@ -46,6 +46,11 @@ RUN abuild checksum && abuild -rK
 WORKDIR /home/builder/xf86-video-chips
 RUN abuild checksum && abuild -rK
 
+WORKDIR /home/builder/barrier
+RUN abuild -rK
+
+WORKDIR /home/builder/
+
 USER root
 RUN mkdir /src && mv /home/builder/*/src/* /src/
 
@@ -134,10 +139,11 @@ RUN rm \
 ###############################################################
 FROM $I386_BASE_IMAGE as debugroot
 
-COPY --from=aports_builder /home/builder/packages/builder/ /packages/
-RUN echo @custom /packages >> /etc/apk/repositories
+COPY --from=aports_builder /home/builder/packages/builder/ /usr/local/pkg/
+COPY --from=aports_builder /home/builder/.abuild/*.pub /etc/apk/keys/
+RUN echo @custom /usr/local/pkg >> /etc/apk/repositories
 
-RUN apk --update-cache --allow-untrusted add \
+RUN apk --update-cache add \
         musl-dbg libstdc++ \
         xorg-server@custom \
         xorg-server-dbg@custom \
@@ -154,7 +160,7 @@ COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzIma
 COPY --from=kernel_builder /home/builder/lib/ /lib/
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 
-RUN apk --update-cache --allow-untrusted add \
+RUN apk --update-cache add \
         pcmciautils nbd dhclient
 
 COPY etc/fstab /etc/
@@ -165,17 +171,19 @@ COPY grub/grub.cfg /boot/grub/
 FROM rootfs_common as rootfs_large
 
 COPY --from=aports_builder /home/builder/packages/builder/ /usr/local/pkg/
+COPY --from=aports_builder /home/builder/.abuild/*.pub /etc/apk/keys/
 RUN echo @custom /usr/local/pkg >> /etc/apk/repositories
 
 RUN echo "root:vote" | chpasswd
 
-RUN apk --update-cache --allow-untrusted add \
+RUN apk --update-cache add \
         minicom vim tmux gdb xterm \
         alpine-base eudev udev-init-scripts-openrc \
         dropbear dropbear-openrc \
         libx11 libxt libxext libxpm libstdc++ \
-        xset xhost xterm twm \
-        xorg-server@custom xf86-video-chips@custom
+        xset xhost xterm twm fvwm \
+        xorg-server@custom xf86-video-chips@custom \
+        barrier@custom
 
 # Serial console by default
 RUN echo ttyS2 >> /etc/securetty && \
@@ -193,7 +201,6 @@ RUN rm -R \
         /sbin/init
 
 COPY etc/init.sh /sbin/init
-
 
 ###############################################################
 FROM $I386_BASE_IMAGE as image_builder
