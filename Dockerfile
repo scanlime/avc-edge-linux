@@ -25,6 +25,9 @@ RUN mkdir linux && tar Jxf linux.tar.xz --strip-components=1 -C linux
 WORKDIR /home/builder/linux
 
 COPY kernel/config .config
+COPY kernel/*.patch ./
+RUN patch -p1 -i avc-edge-irq.patch
+
 RUN make -j16
 RUN make INSTALL_MOD_PATH=/home/builder modules_install
 RUN rm vmlinux-gdb.py && ln -s scripts/gdb/vmlinux-gdb.py .

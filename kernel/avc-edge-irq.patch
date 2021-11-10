@@ -1,0 +1,14 @@
+diff --git a/arch/x86/kernel/irqinit.c b/arch/x86/kernel/irqinit.c
+index beb1bada1b0a..d1b32cf899fd 100644
+--- a/arch/x86/kernel/irqinit.c
++++ b/arch/x86/kernel/irqinit.c
+@@ -101,5 +101,9 @@ void __init native_init_IRQ(void)
+ 		/* IRQ2 is cascade interrupt to second interrupt controller */
+ 		if (request_irq(2, no_action, IRQF_NO_THREAD, "cascade", NULL))
+ 			pr_err("%s: request_irq() failed\n", "cascade");
++
++		/* Hack for AVC-Edge IRQs */
++		if (request_irq(3, no_action, IRQF_NO_THREAD, "reserved", NULL))
++			pr_err("%s: request_irq() failed\n", "irq3");
+ 	}
+ }
