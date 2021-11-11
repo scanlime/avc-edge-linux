@@ -14,8 +14,8 @@ while true; do
 
                 /lib/udev/pcmcia-socket-startup 0
                 /lib/udev/pcmcia-socket-startup 1
-                modprobe 3c589_cs
                 modprobe pata_pcmcia
+                modprobe 3c589_cs
 
                 swapon -a
                 mount /home

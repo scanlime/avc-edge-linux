@@ -181,6 +181,7 @@ RUN echo "root:vote" | chpasswd
 
 RUN apk --update-cache add \
         minicom vim tmux gdb \
+        cmatrix figlet fortune htop wireshark \
         util-linux bash coreutils binutils findutils grep \
         musl-locales mandoc man-pages docs \
         make gcc build-base \
