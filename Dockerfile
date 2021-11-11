@@ -164,7 +164,7 @@ COPY --from=kernel_builder /home/builder/lib/ /lib/
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 
 RUN apk --update-cache add \
-        pcmciautils nbd dhclient
+        pcmciautils nbd dhclient e2fsprogs
 
 COPY etc/fstab /etc/
 COPY etc/pcmcia/config.opts /etc/pcmcia/
@@ -180,11 +180,15 @@ RUN echo @custom /usr/local/pkg >> /etc/apk/repositories
 RUN echo "root:vote" | chpasswd
 
 RUN apk --update-cache add \
-        minicom vim tmux gdb xterm \
+        minicom vim tmux gdb \
+        util-linux bash coreutils binutils findutils grep \
+        musl-locales mandoc man-pages docs \
+        make gcc build-base \
         alpine-base eudev udev-init-scripts-openrc \
         dropbear dropbear-openrc \
         libx11 libxt libxext libxpm libstdc++ \
-        xset xhost xterm twm fvwm \
+        xset xhost xterm twm fvwm xeyes xdpyinfo \
+        xfce4 xfce4-terminal wine \
         xorg-server@custom xf86-video-chips@custom \
         barrier@custom
 
@@ -194,7 +198,12 @@ RUN echo ttyS2 >> /etc/securetty && \
 
 COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/local/bin/
 COPY --from=micropolis_builder /home/builder/usr/ /usr/
-COPY etc/xorg.conf /etc/
+COPY etc/xorg.conf /etc/xorg.conf
+COPY etc/network/interfaces /etc/network/interfaces
+
+RUN setup-keymap us us
+RUN setup-hostname am486
+RUN rc-update add udev
 
 ###############################################################
 FROM rootfs_common as rootfs_small

@@ -1,4 +1,5 @@
 /dev/sda1 / ext4 rw,relatime 0 0
-none /sys sysfs defaults 0 0
-none /sys/kernel/debug debugfs defaults 0 0
 none /tmp tmpfs defaults 0 0
+
+/dev/sdb1 /home ext4 rw,relatime,noauto 0 0
+/dev/sdb2 swap swap none 0 0

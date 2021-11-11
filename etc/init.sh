@@ -4,6 +4,7 @@ while true; do
                 set -ve
 
                 mount -t proc none /proc
+                mount -t sysfs none /sys
                 mount -o remount,rw /
                 mount -a
                 mkdir -p /netroot
@@ -13,8 +14,12 @@ while true; do
 
                 /lib/udev/pcmcia-socket-startup 0
                 /lib/udev/pcmcia-socket-startup 1
-
                 modprobe 3c589_cs
+                modprobe pata_pcmcia
+
+                swapon -a
+                mount /home
+
                 dhclient eth0
                 ip addr
                 ntpd -qndp 10.0.0.1
