@@ -1,5 +1,5 @@
-ARG I386_BASE_IMAGE=i386/alpine:3.14.2
-ARG LINUX_URL=https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.15.1.tar.xz
+ARG I386_BASE_IMAGE=i386/alpine:3.14.3
+ARG LINUX_URL=https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.15.2.tar.xz
 ARG GRUB_URL=https://git.savannah.gnu.org/git/grub.git
 ARG GRUB_VERSION=50aace6bdb918150ba47e3c16146dcca271c134a
 
