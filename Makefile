@@ -1,5 +1,8 @@
 PREFIX=avc-edge-linux
 
+.PHONY: all
+all: clean build debug flash nbd
+
 .PHONY: build
 build:
 	mkdir -p build

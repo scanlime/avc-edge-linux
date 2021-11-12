@@ -159,7 +159,7 @@ COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 
 RUN apk --update-cache add \
         pcmciautils nbd dhclient e2fsprogs \
-        linuxconsoletools@custom
+        minicom linuxconsoletools@custom
 
 COPY etc/fstab /etc/
 COPY etc/pcmcia/config.opts /etc/pcmcia/
