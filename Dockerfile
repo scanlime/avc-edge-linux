@@ -32,7 +32,6 @@ RUN make -j16
 RUN make INSTALL_MOD_PATH=/home/builder modules_install
 RUN rm vmlinux-gdb.py && ln -s scripts/gdb/vmlinux-gdb.py .
 
-
 ###############################################################
 FROM $I386_BASE_IMAGE as aports_builder
 
@@ -41,21 +40,13 @@ RUN adduser -G abuild -D builder
 RUN echo "%abuild ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers && chmod 440 /etc/sudoers
 COPY --chown=builder:abuild aports /home/builder/
 USER builder
+WORKDIR /home/builder
 RUN abuild-keygen -ain
 
-WORKDIR /home/builder/xorg-server
-RUN abuild checksum && abuild -rK
-
-WORKDIR /home/builder/xf86-video-chips
-RUN abuild checksum && abuild -rK
-
-WORKDIR /home/builder/barrier
-RUN abuild -rK
-
-WORKDIR /home/builder/
-
-USER root
-RUN mkdir /src && mv /home/builder/*/src/* /src/
+RUN cd xorg-server && abuild checksum && abuild -rK
+RUN cd xf86-video-chips && abuild checksum && abuild -rK
+RUN cd linuxconsoletools && abuild checksum && abuild -rK
+RUN cd barrier && abuild -rK
 
 ###############################################################
 FROM $I386_BASE_IMAGE as xdaliclock_builder
@@ -140,11 +131,14 @@ RUN rm \
         /usr/local/lib/grub/i386-pc/regexp*
 
 ###############################################################
-FROM $I386_BASE_IMAGE as debugroot
+FROM $I386_BASE_IMAGE as base_with_packages
 
-COPY --from=aports_builder /home/builder/packages/builder/ /usr/local/pkg/
 COPY --from=aports_builder /home/builder/.abuild/*.pub /etc/apk/keys/
+COPY --from=aports_builder /home/builder/packages/builder/ /usr/local/pkg/
 RUN echo @custom /usr/local/pkg >> /etc/apk/repositories
+
+###############################################################
+FROM base_with_packages as debugroot
 
 RUN apk --update-cache add \
         musl-dbg libstdc++ \
@@ -153,31 +147,33 @@ RUN apk --update-cache add \
         xf86-video-chips@custom
 
 COPY --from=aports_builder \
-        /src/xf86-video-chips-1.4.0/src/.libs/chips_drv.so \
+        /home/builder/xf86-video-chips/src/xf86-video-chips-1.4.0/src/.libs/chips_drv.so \
         /usr/lib/xorg/modules/drivers/chips_drv.so
 
 ###############################################################
-FROM $I386_BASE_IMAGE as rootfs_common
+FROM base_with_packages as rootfs_common
 
 COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
 COPY --from=kernel_builder /home/builder/lib/ /lib/
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 
 RUN apk --update-cache add \
-        pcmciautils nbd dhclient e2fsprogs
+        pcmciautils nbd dhclient e2fsprogs \
+        linuxconsoletools@custom
 
 COPY etc/fstab /etc/
 COPY etc/pcmcia/config.opts /etc/pcmcia/
+COPY etc/network/interfaces /etc/network/interfaces
 COPY grub/grub.cfg /boot/grub/
+
+# Serial console by default
+RUN echo ttyS2 >> /etc/securetty && \
+  echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100 >> /etc/inittab
+
+RUN echo "root:vote" | chpasswd
 
 ###############################################################
 FROM rootfs_common as rootfs_large
-
-COPY --from=aports_builder /home/builder/packages/builder/ /usr/local/pkg/
-COPY --from=aports_builder /home/builder/.abuild/*.pub /etc/apk/keys/
-RUN echo @custom /usr/local/pkg >> /etc/apk/repositories
-
-RUN echo "root:vote" | chpasswd
 
 RUN apk --update-cache add \
         minicom vim tmux gdb \
@@ -193,14 +189,9 @@ RUN apk --update-cache add \
         xorg-server@custom xf86-video-chips@custom \
         barrier@custom
 
-# Serial console by default
-RUN echo ttyS2 >> /etc/securetty && \
-  echo ttyS2::respawn:/sbin/getty -L ttyS2 115200 vt100 >> /etc/inittab
-
 COPY --from=xdaliclock_builder /home/builder/xdaliclock-2.44/X11/xdaliclock /usr/local/bin/
 COPY --from=micropolis_builder /home/builder/usr/ /usr/
 COPY etc/xorg.conf /etc/xorg.conf
-COPY etc/network/interfaces /etc/network/interfaces
 
 RUN setup-keymap us us
 RUN setup-hostname am486
@@ -210,6 +201,7 @@ RUN rc-update add udev
 FROM rootfs_common as rootfs_small
 
 RUN rm -R \
+        /usr/local/pkg \
         /var/cache \
         /sbin/init
 
@@ -234,7 +226,8 @@ WORKDIR /work
 COPY --from=debugroot /bin /debugroot/bin
 COPY --from=debugroot /usr /debugroot/usr
 COPY --from=debugroot /lib /debugroot/lib
-COPY --from=aports_builder /src /debugroot/src
+COPY --from=aports_builder /home/builder/xorg-server/src /debugroot/src
+COPY --from=aports_builder /home/builder/xf86-video-chips/src /debugroot/src
 COPY --from=kernel_builder /home/builder/linux /debugroot/linux
 COPY --from=bootloader_installer /home/builder/grub/grub-core /debugroot/grub-core
 

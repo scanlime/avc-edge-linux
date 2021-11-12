@@ -1,0 +1,13 @@
+diff --git a/utils/inputattach.c b/utils/inputattach.c
+index 092f84b..bb4edce 100644
+--- a/utils/inputattach.c
++++ b/utils/inputattach.c
+@@ -825,6 +825,8 @@ static struct input_types input_types[] = {
+ { "--dump",		"-dump",	"Just enable device",
+ 	B2400, CS8,
+ 	0,			0x00,	0x00,	0,	dump_init },
++{ "--dynapro",		"-dynapro",	"3M Dynapro",
++	B2400, CS7,		0x00,	0x00,	0,	NULL },
+ #ifdef SERIO_EGALAX
+ { "--eetiegalax",	"-eeti",	"EETI eGalaxTouch",
+ 	B9600, CS8,

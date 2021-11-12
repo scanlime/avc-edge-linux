@@ -1,0 +1,22 @@
+# Maintainer: Natanael Copa <ncopa@alpinelinux.org>
+pkgname=linuxconsoletools
+pkgver=1.7.1
+pkgrel=0
+pkgdesc="Tools for connecting joysticks & legacy devices to the kernels input subsystem"
+url="https://sourceforge.net/projects/linuxconsole/"
+arch="all"
+license="GPL-2.0-or-later"
+makedepends="linux-headers sdl2-dev"
+subpackages="$pkgname-doc"
+source="https://downloads.sourceforge.net/linuxconsole/linuxconsoletools-$pkgver.tar.bz2
+        dynapro-support.patch"
+
+build() {
+	make PREFIX=/usr
+}
+
+package() {
+	make PREFIX=/usr DESTDIR="$pkgdir" install
+}
+
+sha512sums="2ba97e6c5b57aa5d6b08369bae050256f4d039f5b8479ad03cef4a7c43bf772db312de54d9e70a8a92c9ed7933b524715f1ce5448ccf508e6ffe8646a9dbd349  linuxconsoletools-1.7.1.tar.bz2"
