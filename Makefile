@@ -51,7 +51,7 @@ run: build build/rw-disk.img
 .PHONY: flash
 flash: build build/disk.img
 	scp build/disk.img crouton:tmp/disk.img
-	ssh crouton lsblk /dev/sda '&&' sudo dd if=tmp/disk.img of=/dev/sda bs=64K
+	ssh crouton lsblk /dev/sda '&&' sudo dd if=tmp/disk.img of=/dev/sda bs=4K oflag=direct status=progress
 
 .PHONY: grubdebug
 grubdebug: build/debugroot

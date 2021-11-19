@@ -17,10 +17,8 @@ while true; do
                 modprobe pata_pcmcia
                 modprobe 3c589_cs
 
-                # to do: this is failing because
-                # pata_pcmcia isn't reliably loading (-ENOMEM)
-                #swapon -a
-                #mount /home
+                swapon -a
+                mount /home
 
                 dhclient eth0
                 ip addr

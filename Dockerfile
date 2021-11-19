@@ -3,7 +3,9 @@ ARG LINUX_URL=https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.15.2.tar.xz
 ARG GRUB_URL=https://git.savannah.gnu.org/git/grub.git
 ARG GRUB_VERSION=50aace6bdb918150ba47e3c16146dcca271c134a
 
-ARG DISK_SIZE_CYLINDERS=978
+# Card is 64M (978 cyl) but there's a bad spot
+# somewhere around cyl 920...
+ARG DISK_SIZE_CYLINDERS=800
 ARG DISK_SIZE_HEADS=4
 ARG DISK_SIZE_SECTORS=32
 
@@ -25,9 +27,6 @@ RUN mkdir linux && tar Jxf linux.tar.xz --strip-components=1 -C linux
 WORKDIR /home/builder/linux
 
 COPY kernel/config .config
-COPY kernel/*.patch ./
-RUN patch -p1 -i avc-edge-irq.patch
-
 RUN make -j16
 RUN make INSTALL_MOD_PATH=/home/builder modules_install
 RUN rm vmlinux-gdb.py && ln -s scripts/gdb/vmlinux-gdb.py .
@@ -158,8 +157,7 @@ COPY --from=kernel_builder /home/builder/lib/ /lib/
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 
 RUN apk --update-cache add \
-        pcmciautils nbd dhclient e2fsprogs \
-        minicom linuxconsoletools@custom
+        pcmciautils nbd dhclient
 
 COPY etc/fstab /etc/
 COPY etc/pcmcia/config.opts /etc/pcmcia/
@@ -176,6 +174,7 @@ RUN echo "root:vote" | chpasswd
 FROM rootfs_common as rootfs_large
 
 RUN apk --update-cache add \
+        e2fsprogs linuxconsoletools@custom \
         minicom vim tmux gdb \
         cmatrix figlet fortune htop wireshark \
         util-linux bash coreutils binutils findutils grep \
