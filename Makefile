@@ -18,39 +18,36 @@ clean:
 debug: build build/debugroot build/rw-netroot.img build/rw-disk.img
 
 build/debugroot: build
-	docker cp ${PREFIX}-tmp:/debugroot build/
+	docker cp ${PREFIX}-tmp:/build/debugroot build/
 
-build/netroot.img: build
-	docker cp ${PREFIX}-tmp:/work/netroot.img build/
+build/rootfs.img: build
+	docker cp ${PREFIX}-tmp:/build/rootfs.img build/
 	chmod a-w build/netroot.img
 
-build/disk.img: build
-	docker cp ${PREFIX}-tmp:/work/disk.img build/
+build/bootdisk.img: build
+	docker cp ${PREFIX}-tmp:/build/bootdisk.img build/
 	chmod a-w build/disk.img
 
-build/rw-netroot.img: build/netroot.img
-	cp -f build/netroot.img build/rw-netroot.img
-	chmod 0600 build/rw-netroot.img
-
-build/rw-disk.img: build/disk.img
-	cp -f build/disk.img build/rw-disk.img
-	chmod 0600 build/rw-disk.img
+build/rw-rootfs.img: build/rootfs.img
+	cp -f build/rootfs.img build/rw-rootfs.img
+	chmod 0600 build/rw-rootfs.img
 
 .PHONY: nbd
-nbd: build/rw-netroot.img
-	nbd-server 19999 `pwd`/build/rw-netroot.img -d -M 1 -C /dev/null
+nbd: build/rw-rootfs.img
+	nbd-server 19999 `pwd`/build/rw-rootfs.img -d -M 1 -C /dev/null
 
 .PHONY: run
-run: build build/rw-disk.img
+run: build build/rw-rootfs.img build/bootdisk.img
 	qemu-system-i386 -curses \
 		-machine isapc -cpu 486 -m 32 \
-		-drive if=ide,index=0,format=raw,file=build/rw-disk.img \
+		-drive if=ide,index=0,format=raw,file=build/bootdisk.img \
+		-drive if=ide,index=2,format=raw,file=build/rw-rootfs.img \
 		-chardev socket,id=debug,host=127.0.0.1,port=1234,server=on,wait=off \
 		-device isa-serial,iobase=0x3e8,chardev=debug,id=com3
 
 .PHONY: flash
-flash: build build/disk.img
-	scp build/disk.img crouton:tmp/disk.img
+flash: build build/bootdisk.img
+	scp build/bootdisk.img crouton:tmp/disk.img
 	ssh crouton lsblk /dev/sda '&&' sudo dd if=tmp/disk.img of=/dev/sda bs=4K oflag=direct status=progress
 
 .PHONY: grubdebug

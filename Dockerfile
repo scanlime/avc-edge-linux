@@ -3,11 +3,10 @@ ARG LINUX_URL=https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.15.2.tar.xz
 ARG GRUB_URL=https://git.savannah.gnu.org/git/grub.git
 ARG GRUB_VERSION=50aace6bdb918150ba47e3c16146dcca271c134a
 
-# Card is 64M (978 cyl) but there's a bad spot
-# somewhere around cyl 920...
-ARG DISK_SIZE_CYLINDERS=800
-ARG DISK_SIZE_HEADS=4
-ARG DISK_SIZE_SECTORS=32
+# The BIOS cares about CHS geometry, heads and sectors should match your disk
+ARG BOOT_DISK_CYLINDERS=60
+ARG BOOT_DISK_HEADS=4
+ARG BOOT_DISK_SECTORS=32
 
 ###############################################################
 FROM $I386_BASE_IMAGE as kernel_builder
@@ -197,22 +196,11 @@ RUN setup-hostname am486
 RUN rc-update add udev
 
 ###############################################################
-FROM rootfs_common as rootfs_small
-
-RUN rm -R \
-        /usr/local/pkg \
-        /var/cache \
-        /sbin/init
-
-COPY etc/init.sh /sbin/init
-
-###############################################################
-FROM $I386_BASE_IMAGE as image_builder
-ARG DISK_SIZE_CYLINDERS
-ARG DISK_SIZE_HEADS
-ARG DISK_SIZE_SECTORS
+FROM $I386_BASE_IMAGE as boot_disk_builder
+ARG BOOT_DISK_CYLINDERS
+ARG BOOT_DISK_HEADS
+ARG BOOT_DISK_SECTORS
 ARG GRUB_RESERVED_TRACKS=2
-ARG NET_ROOT_SIZE=1G
 
 RUN apk add \
   qemu-system-i386 util-linux e2fsprogs wget less xxd bash
@@ -221,25 +209,15 @@ SHELL ["/bin/bash", "-c"]
 RUN mkdir /work
 WORKDIR /work
 
-# Prepare userspace debug symbols
-COPY --from=debugroot /bin /debugroot/bin
-COPY --from=debugroot /usr /debugroot/usr
-COPY --from=debugroot /lib /debugroot/lib
-COPY --from=aports_builder /home/builder/xorg-server/src /debugroot/src
-COPY --from=aports_builder /home/builder/xf86-video-chips/src /debugroot/src
-COPY --from=kernel_builder /home/builder/linux /debugroot/linux
-COPY --from=bootloader_installer /home/builder/grub/grub-core /debugroot/grub-core
-
 # Partition with careful attention to DOS CHS geometry
-RUN echo $[ $DISK_SIZE_CYLINDERS * $DISK_SIZE_HEADS * $DISK_SIZE_SECTORS ] > total.sectors && \
-  echo $[ $GRUB_RESERVED_TRACKS * $DISK_SIZE_SECTORS ] > rootfs.sector && \
+RUN echo $[ $BOOT_DISK_CYLINDERS * $BOOT_DISK_HEADS * $BOOT_DISK_SECTORS ] > total.sectors && \
+  echo $[ $GRUB_RESERVED_TRACKS * $BOOT_DISK_SECTORS ] > rootfs.sector && \
   echo $[ ( `cat total.sectors` - `cat rootfs.sector` ) / 2 ] > rootfs.kilobytes && \
   dd if=/dev/zero of=disk.img bs=512 count=`cat total.sectors` && \
   echo -ne "o\nn\np\n1\n`cat rootfs.sector`\n\na\nw\n" > fdisk.command && \
-  fdisk -cdos -walways -C$DISK_SIZE_CYLINDERS -H$DISK_SIZE_HEADS -S$DISK_SIZE_SECTORS disk.img < fdisk.command
+  fdisk -cdos -walways -C$BOOT_DISK_CYLINDERS -H$BOOT_DISK_HEADS -S$BOOT_DISK_SECTORS disk.img < fdisk.command
 
-# Build main rootfs as ext2 then add a journal after setting up grub
-COPY --from=rootfs_small / /rootfs/
+COPY grub/grub.cfg /rootfs/boot/grub/
 RUN mkfs.ext2 -d /rootfs/ -b 1024 -m 0 -v rootfs.img `cat rootfs.kilobytes` && \
   dd if=rootfs.img of=disk.img bs=512 seek=`cat rootfs.sector` conv=notrunc
 
@@ -249,16 +227,40 @@ COPY --from=bootloader_installer / /bootloader_installer/
 RUN mkfs.ext4 -d /bootloader_installer/ -m 0 -v \
   bootloader_installer.img \
   $[ 2 * `du -s /bootloader_installer/ | cut -f1` ]
+
+COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzImage
 RUN qemu-system-i386 \
   -machine isapc -cpu 486 -no-reboot \
   -drive if=ide,index=0,format=raw,file=disk.img \
   -drive if=ide,index=1,format=raw,file=bootloader_installer.img \
-  -nographic -kernel /rootfs/boot/bzImage -append \
+  -nographic -kernel /boot/bzImage -append \
   "console=ttyS0,115200 root=/dev/sdb panic=-1 init=/setup.sh"
 
 # Check that we completed setup.sh
 RUN diff <(xxd bootloader_installer.img | head) <(xxd /bootloader_installer/setup_done | head)
 
-# Build large rootfs for network use
-COPY --from=rootfs_large / /netroot/
-RUN mkfs.ext2 -d /netroot/ -b 4096 -m 0 -v netroot.img $NET_ROOT_SIZE
+###############################################################
+FROM $I386_BASE_IMAGE as root_image_builder
+ARG ROOT_SIZE=1G
+
+WORKDIR /work
+RUN apk add e2fsprogs
+
+# Build large rootfs compatible with network block device or sdcard
+COPY --from=rootfs_large / /rootfs/
+RUN mkfs.ext4 -d /rootfs/ -b 4096 -m 0 -v rootfs.img $ROOT_SIZE
+
+###############################################################
+FROM $I386_BASE_IMAGE as outputs
+
+# Prepare userspace debug symbols
+COPY --from=debugroot /bin /build/debugroot/bin
+COPY --from=debugroot /usr /build/debugroot/usr
+COPY --from=debugroot /lib /build/debugroot/lib
+COPY --from=aports_builder /home/builder/xorg-server/src /build/debugroot/src
+COPY --from=aports_builder /home/builder/xf86-video-chips/src /build/debugroot/src
+COPY --from=kernel_builder /home/builder/linux /build/debugroot/linux
+COPY --from=bootloader_installer /home/builder/grub/grub-core /build/debugroot/grub-core
+
+COPY --from=root_image_builder /work/rootfs.img /build/rootfs.img
+COPY --from=boot_disk_builder /work/disk.img /build/bootdisk.img
