@@ -1,0 +1,34 @@
+diff --git a/grub-core/disk/pata.c b/grub-core/disk/pata.c
+index c757e65ae..84773971b 100644
+--- a/grub-core/disk/pata.c
++++ b/grub-core/disk/pata.c
+@@ -22,7 +22,10 @@
+ #include <grub/disk.h>
+ #include <grub/dl.h>
+ #include <grub/mm.h>
+-#ifndef GRUB_MACHINE_MIPS_QEMU_MIPS
++
++#define GRUB_PATA_WITHOUT_PCI
++
++#ifndef GRUB_PATA_WITHOUT_PCI
+ #include <grub/pci.h>
+ #include <grub/cs5536.h>
+ #else
+@@ -113,7 +116,7 @@ grub_pata_wait (void)
+   grub_millisleep (50);
+ }
+ 
+-#ifdef GRUB_MACHINE_MIPS_QEMU_MIPS
++#ifdef GRUB_PATA_WITHOUT_PCI
+ #define grub_ata_to_cpu16(x) ((grub_uint16_t) (x))
+ #define grub_cpu_to_ata16(x) ((grub_uint16_t) (x))
+ #else
+@@ -343,7 +346,7 @@ grub_pata_device_initialize (int port, int device, int addr)
+   return 0;
+ }
+ 
+-#ifndef GRUB_MACHINE_MIPS_QEMU_MIPS
++#ifndef GRUB_PATA_WITHOUT_PCI
+ static int
+ grub_pata_pciinit (grub_pci_device_t dev,
+ 		   grub_pci_id_t pciid,

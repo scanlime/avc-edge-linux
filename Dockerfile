@@ -111,6 +111,10 @@ RUN patch -p1 -i no-pae-mode.patch
 COPY grub/no-bios-disk-bounds-check.patch .
 RUN patch -p1 -i no-bios-disk-bounds-check.patch
 
+# We want to use PATA disks (via PCMCIA and SuperIO) but grub's driver assumes PCI
+COPY grub/pata-without-pci.patch .
+RUN patch -p1 -i pata-without-pci.patch
+
 RUN make -j16
 USER root
 RUN make install
