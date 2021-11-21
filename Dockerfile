@@ -115,6 +115,11 @@ RUN patch -p1 -i no-bios-disk-bounds-check.patch
 COPY grub/pata-without-pci.patch .
 RUN patch -p1 -i pata-without-pci.patch
 
+# GRUB uses a 1ms timer delay in its PATA which isn't practical on
+# systems without high res timers or TSC, swap it for an I/O delay.
+COPY grub/pata-io-delay.patch .
+RUN patch -p1 -i pata-io-delay.patch
+
 RUN make -j16
 USER root
 RUN make install

@@ -26,7 +26,7 @@ build/rootfs.img: build
 
 build/bootdisk.img: build
 	docker cp ${PREFIX}-tmp:/build/bootdisk.img build/
-	chmod a-w build/disk.img
+	chmod a-w build/bootdisk.img
 
 build/rw-rootfs.img: build/rootfs.img
 	cp -f build/rootfs.img build/rw-rootfs.img
