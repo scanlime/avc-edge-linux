@@ -170,7 +170,7 @@ RUN apk --update-cache add \
 COPY etc/fstab /etc/
 COPY etc/pcmcia/config.opts /etc/pcmcia/
 COPY etc/network/interfaces /etc/network/interfaces
-COPY grub/grub.cfg /boot/grub/
+COPY grub/grub-linux.cfg /boot/grub/grub.cfg
 
 # Serial console by default
 RUN echo ttyS2 >> /etc/securetty && \
@@ -226,7 +226,7 @@ RUN echo $[ $BOOT_DISK_CYLINDERS * $BOOT_DISK_HEADS * $BOOT_DISK_SECTORS ] > tot
   echo -ne "o\nn\np\n1\n`cat rootfs.sector`\n\na\nw\n" > fdisk.command && \
   fdisk -cdos -walways -C$BOOT_DISK_CYLINDERS -H$BOOT_DISK_HEADS -S$BOOT_DISK_SECTORS disk.img < fdisk.command
 
-COPY grub/grub.cfg /rootfs/boot/grub/
+COPY grub/grub-startup.cfg /rootfs/boot/grub/grub.cfg
 RUN mkfs.ext2 -d /rootfs/ -b 1024 -m 0 -v rootfs.img `cat rootfs.kilobytes` && \
   dd if=rootfs.img of=disk.img bs=512 seek=`cat rootfs.sector` conv=notrunc
 
