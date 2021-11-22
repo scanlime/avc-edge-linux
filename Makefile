@@ -15,14 +15,14 @@ clean:
 	rm -Rf ./build
 
 .PHONY: debug
-debug: build build/debugroot build/rw-netroot.img build/rw-disk.img
+debug: build build/debugroot build/rw-rootfs.img build/bootdisk.img
 
 build/debugroot: build
 	docker cp ${PREFIX}-tmp:/build/debugroot build/
 
 build/rootfs.img: build
 	docker cp ${PREFIX}-tmp:/build/rootfs.img build/
-	chmod a-w build/netroot.img
+	chmod a-w build/rootfs.img
 
 build/bootdisk.img: build
 	docker cp ${PREFIX}-tmp:/build/bootdisk.img build/
