@@ -164,9 +164,6 @@ COPY --from=kernel_builder /home/builder/linux/arch/x86/boot/bzImage /boot/bzIma
 COPY --from=kernel_builder /home/builder/lib/ /lib/
 COPY --from=aports_builder /usr/bin/gdbserver /usr/bin/
 
-RUN apk --update-cache add \
-        pcmciautils nbd dhclient
-
 COPY etc/fstab /etc/
 COPY etc/pcmcia/config.opts /etc/pcmcia/
 COPY etc/network/interfaces /etc/network/interfaces
@@ -179,10 +176,22 @@ RUN echo ttyS2 >> /etc/securetty && \
 RUN echo "root:vote" | chpasswd
 
 ###############################################################
+FROM $I386_BASE_IMAGE as initfs
+
+RUN apk --update-cache add \
+	pcmciautils
+
+COPY etc/fstab /etc/
+COPY etc/pcmcia/config.opts /etc/pcmcia/
+COPY etc/network/interfaces /etc/network/interfaces
+COPY etc/initrd.sh /sbin/init
+
+###############################################################
 FROM rootfs_common as rootfs_large
 
 RUN apk --update-cache add \
         e2fsprogs linuxconsoletools@custom \
+        pcmciautils nbd dhclient \
         minicom vim tmux gdb \
         cmatrix figlet fortune htop wireshark \
         util-linux bash coreutils binutils findutils grep \
@@ -253,10 +262,11 @@ FROM $I386_BASE_IMAGE as root_image_builder
 ARG ROOT_SIZE=1G
 
 WORKDIR /work
-RUN apk add e2fsprogs
+RUN apk add e2fsprogs cpio
 
-# Build large rootfs compatible with network block device or sdcard
 COPY --from=rootfs_large / /rootfs/
+COPY --from=initfs / /initfs/
+RUN (cd /initfs; find . | sort | cpio --quiet --renumber-inodes	-o -H newc) > /rootfs/boot/initramfs
 RUN mkfs.ext4 -d /rootfs/ -b 4096 -m 0 -v rootfs.img $ROOT_SIZE
 
 ###############################################################
