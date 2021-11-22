@@ -266,7 +266,7 @@ RUN apk add e2fsprogs cpio
 
 COPY --from=rootfs_large / /rootfs/
 COPY --from=initfs / /initfs/
-RUN (cd /initfs; find . | sort | cpio --quiet --renumber-inodes	-o -H newc) > /rootfs/boot/initramfs
+RUN (cd /initfs; find . | sort | cpio --quiet --renumber-inodes	-o -H newc | lzop) > /rootfs/boot/initramfs
 RUN mkfs.ext4 -d /rootfs/ -b 4096 -m 0 -v rootfs.img $ROOT_SIZE
 
 ###############################################################
