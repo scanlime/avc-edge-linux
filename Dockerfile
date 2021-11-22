@@ -186,6 +186,14 @@ COPY etc/pcmcia/config.opts /etc/pcmcia/
 COPY etc/network/interfaces /etc/network/interfaces
 COPY etc/initrd.sh /init
 
+RUN rm -R \
+	/lib/libssl.* \
+	/lib/libapk.* \
+	/lib/libcrypto.* \
+	/lib/apk \
+	/sbin/apk \
+	/var/cache
+
 ###############################################################
 FROM rootfs_common as rootfs_large
 
