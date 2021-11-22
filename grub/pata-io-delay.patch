@@ -1,0 +1,45 @@
+diff --git a/grub-core/disk/pata.c b/grub-core/disk/pata.c
+index 84773971b..51e2001ce 100644
+--- a/grub-core/disk/pata.c
++++ b/grub-core/disk/pata.c
+@@ -72,28 +72,31 @@ grub_pata_regget (struct grub_pata_device *dev, int reg)
+   return grub_inb (dev->ioaddress + reg);
+ }
+ 
++static inline void
++grub_pata_io_delay (void)
++{
++  grub_outb (0xaa, 0x80);
++}
++
+ /* Wait for !BSY.  */
+ static grub_err_t
+-grub_pata_wait_not_busy (struct grub_pata_device *dev, int milliseconds)
++grub_pata_wait_not_busy (struct grub_pata_device *dev, int timeout)
+ {
+-  /* ATA requires 400ns (after a write to CMD register) or
+-     1 PIO cycle (after a DRQ block transfer) before
+-     first check of BSY.  */
+-  grub_millisleep (1);
++  grub_pata_io_delay();
+ 
+   int i = 1;
+   grub_uint8_t sts;
+   while ((sts = grub_pata_regget (dev, GRUB_ATA_REG_STATUS))
+ 	 & GRUB_ATA_STATUS_BUSY)
+     {
+-      if (i >= milliseconds)
++      if (i >= timeout)
+         {
+-	  grub_dprintf ("pata", "timeout: %dms, status=0x%x\n",
+-			milliseconds, sts);
++	  grub_dprintf ("pata", "timeout: %d, status=0x%x\n",
++			timeout, sts);
+ 	  return grub_error (GRUB_ERR_TIMEOUT, "PATA timeout");
+ 	}
+ 
+-      grub_millisleep (1);
++      grub_pata_io_delay();
+       i++;
+     }
+ 
