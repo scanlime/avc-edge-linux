@@ -15,7 +15,7 @@ clean:
 	rm -Rf ./build
 
 .PHONY: debug
-debug: build build/debugroot build/rw-rootfs.img build/bootdisk.img
+debug: build build/debugroot build/rootfs.img build/bootdisk.img
 
 build/debugroot: build
 	docker cp ${PREFIX}-tmp:/build/debugroot build/
@@ -38,10 +38,6 @@ build/rw-bootdisk.img: build/bootdisk.img
 	cp -f build/bootdisk.img build/rw-bootdisk.img
 	chmod 0600 build/rw-bootdisk.img
 
-.PHONY: nbd
-nbd: build/rw-rootfs.img
-	nbd-server 19999 `pwd`/build/rw-rootfs.img -d -M 1 -C /dev/null
-
 .PHONY: run
 run: build build/rw-rootdisk.img build/rw-bootdisk.img
 	qemu-system-i386 -curses \
@@ -50,15 +46,6 @@ run: build build/rw-rootdisk.img build/rw-bootdisk.img
 		-drive if=ide,index=2,format=raw,file=build/rw-rootdisk.img \
 		-chardev socket,id=debug,host=127.0.0.1,port=1234,server=on,wait=off \
 		-device isa-serial,iobase=0x3e8,chardev=debug,id=com3
-
-.PHONY: flash
-flash: build build/bootdisk.img
-	scp build/bootdisk.img crouton:tmp/disk.img
-	ssh crouton lsblk /dev/sda '&&' sudo dd if=tmp/disk.img of=/dev/sda bs=4K oflag=direct status=progress
-
-.PHONY: grubdebug
-grubdebug: build/debugroot
-	cd grub && gdb -x grub-gdb-experiment
 
 .PHONY: menuconfig
 menuconfig:
