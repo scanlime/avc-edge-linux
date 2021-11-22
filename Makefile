@@ -1,7 +1,7 @@
 PREFIX=avc-edge-linux
 
 .PHONY: all
-all: clean build debug flash nbd
+all: clean build debug
 
 .PHONY: build
 build:
