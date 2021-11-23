@@ -267,7 +267,7 @@ RUN diff <(xxd bootloader_installer.img | head) <(xxd /bootloader_installer/setu
 
 ###############################################################
 FROM $I386_BASE_IMAGE as root_image_builder
-ARG ROOT_SIZE=1G
+ARG ROOT_SIZE=2G
 
 WORKDIR /work
 RUN apk add e2fsprogs cpio
