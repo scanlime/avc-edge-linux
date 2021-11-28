@@ -199,6 +199,7 @@ FROM rootfs_common as rootfs_large
 
 RUN apk --update-cache add \
         e2fsprogs linuxconsoletools@custom \
+	procps sudo ltrace strace \
         pcmciautils nbd dhclient \
         minicom vim tmux gdb \
         cmatrix figlet fortune htop wireshark \
@@ -220,6 +221,7 @@ COPY etc/xorg.conf /etc/xorg.conf
 RUN setup-keymap us us
 RUN setup-hostname am486
 RUN rc-update add udev
+RUN rc-update add swap
 
 ###############################################################
 FROM $I386_BASE_IMAGE as boot_disk_builder
